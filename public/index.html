@@ -15,7 +15,7 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=6" />
+  <link rel="stylesheet" href="/style.css?v=7" />
 </head>
 <body>
   <div id="app">
@@ -149,12 +149,13 @@
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <h2 id="personTitle">Chi cho ai</h2>
-            <div class="seg small" id="personType">
-              <button class="on" data-t="expense">Chi cho</button>
-              <button data-t="income">Thu từ</button>
-            </div>
+          <div class="card-head"><h2>Người thân</h2></div>
+          <div class="seg" id="personType">
+            <button class="on" data-t="expense">💸 Chi cho ai</button>
+            <button data-t="income">💰 Thu từ ai</button>
+          </div>
+          <div class="donut-wrap" id="personDonutWrap">
+            <div id="personDonut" class="donut"></div>
           </div>
           <div id="personBreakdown"></div>
         </div>
@@ -270,7 +271,7 @@
           </ol>
         </div>
 
-        <p class="muted center small">Ví · v2.2</p>
+        <p class="muted center small">Ví · v2.3</p>
       </section>
     </main>
 
@@ -304,8 +305,8 @@
 
       <div class="cat-grid" id="catGrid"></div>
 
-      <div class="person-row">
-        <span class="person-label" id="personLabel">Chi cho</span>
+      <div class="person-sec">
+        <div class="person-head"><span id="personLabel">Chi cho</span><span class="muted" id="personHint">· không bắt buộc</span></div>
         <div class="person-chips" id="personChips"></div>
       </div>
 
@@ -356,6 +357,6 @@
     <div class="toast" id="toast" role="status"></div>
     <div class="tooltip" id="tip" hidden></div>
   </div>
-  <script src="/app.js?v=6" defer></script>
+  <script src="/app.js?v=7" defer></script>
 </body>
 </html>

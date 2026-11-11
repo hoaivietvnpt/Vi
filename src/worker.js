@@ -28,9 +28,17 @@ const DEFAULT_CATS = [
 ];
 
 const DEFAULT_PEOPLE = [
-  ['Bố', '👨'], ['Mẹ', '👩'], ['Vợ/Chồng', '💞'], ['Con', '👶'], ['Anh', '🧔'],
-  ['Chị', '👩‍🦰'], ['Em', '🧒'], ['Ông bà', '👴'], ['Bạn bè', '🤝'],
+  ['Bố', '👨', '#2a78d6'], ['Mẹ', '👩', '#e87ba4'], ['Vợ/Chồng', '💞', '#e34948'], ['Con', '👶', '#eda100'],
+  ['Anh', '🧔', '#008300'], ['Chị', '👩‍🦰', '#eb6834'], ['Em', '🧒', '#1baf7a'], ['Ông bà', '👴', '#A16207'],
+  ['Bạn bè', '🤝', '#6250d6'],
 ];
+const PEOPLE_COLORS = ['#2a78d6', '#e87ba4', '#e34948', '#eda100', '#008300', '#eb6834', '#1baf7a', '#A16207', '#6250d6', '#0EA5E9', '#14B8A6', '#64748B'];
+const isColor = (c) => /^#[0-9a-f]{6}$/i.test(c || '');
+async function nextPersonColor(DB, bookId) {
+  const { results } = await DB.prepare('SELECT color FROM people WHERE book_id=? AND archived=0').bind(bookId).all();
+  const used = new Set(results.map((r) => r.color.toLowerCase()));
+  return PEOPLE_COLORS.find((c) => !used.has(c.toLowerCase())) || PEOPLE_COLORS[results.length % PEOPLE_COLORS.length];
+}
 
 /* ---------------- helpers ---------------- */
 const json = (data, status = 200, headers = {}) =>
@@ -140,8 +148,8 @@ async function createBook(env, userId, name, icon, { seed = true } = {}) {
     env.DB.prepare('INSERT INTO book_members (book_id,user_id,role,joined_at) VALUES (?,?,?,?)').bind(id, userId, 'owner', now()),
   ];
   if (seed) stmts.push(...seedCategories(env, id));
-  stmts.push(...DEFAULT_PEOPLE.map(([name, icon], i) =>
-    env.DB.prepare('INSERT INTO people (id,book_id,name,icon,sort) VALUES (?,?,?,?,?)').bind(uuid(), id, name, icon, i + 1)));
+  stmts.push(...DEFAULT_PEOPLE.map(([name, icon, color], i) =>
+    env.DB.prepare('INSERT INTO people (id,book_id,name,icon,color,sort) VALUES (?,?,?,?,?,?)').bind(uuid(), id, name, icon, color, i + 1)));
   await env.DB.batch(stmts);
   return id;
 }
@@ -364,15 +372,16 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     if (!name) return bad('Tên không hợp lệ');
     const id = uuid();
     const { max } = await DB.prepare('SELECT COALESCE(MAX(sort),0) AS max FROM people WHERE book_id=?').bind(bookId).first();
-    await DB.prepare('INSERT INTO people (id,book_id,name,icon,sort) VALUES (?,?,?,?,?)')
-      .bind(id, bookId, name, String(b.icon || '🙂').slice(0, 8), max + 1).run();
+    const color = isColor(b.color) ? b.color : await nextPersonColor(DB, bookId);
+    await DB.prepare('INSERT INTO people (id,book_id,name,icon,color,sort) VALUES (?,?,?,?,?,?)')
+      .bind(id, bookId, name, String(b.icon || '🙂').slice(0, 8), color, max + 1).run();
     return json(await DB.prepare('SELECT * FROM people WHERE id=?').bind(id).first(), 201);
   }
   m = sub.match(/^\/people\/([\w-]+)$/);
   if (m && method === 'PUT') {
     const b = await readJson(req);
-    await DB.prepare('UPDATE people SET name=COALESCE(?,name), icon=COALESCE(?,icon), archived=COALESCE(?,archived) WHERE id=? AND book_id=?')
-      .bind(cleanName(b.name, 30) || null, b.icon ? String(b.icon).slice(0, 8) : null, b.archived == null ? null : b.archived ? 1 : 0, m[1], bookId).run();
+    await DB.prepare('UPDATE people SET name=COALESCE(?,name), icon=COALESCE(?,icon), color=COALESCE(?,color), archived=COALESCE(?,archived) WHERE id=? AND book_id=?')
+      .bind(cleanName(b.name, 30) || null, b.icon ? String(b.icon).slice(0, 8) : null, isColor(b.color) ? b.color : null, b.archived == null ? null : b.archived ? 1 : 0, m[1], bookId).run();
     const row = await DB.prepare('SELECT * FROM people WHERE id=? AND book_id=?').bind(m[1], bookId).first();
     return row ? json(row) : bad('Không tìm thấy', 404);
   }
@@ -474,7 +483,7 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
       if (!id) {
         id = uuid();
         peopleByName.set(name.toLowerCase(), id); myPeopleIds.add(id);
-        stmts.push(DB.prepare('INSERT INTO people (id,book_id,name,icon,sort) VALUES (?,?,?,?,?)').bind(id, bookId, name, String(src.icon || '🙂').slice(0, 8), 99));
+        stmts.push(DB.prepare('INSERT INTO people (id,book_id,name,icon,color,sort) VALUES (?,?,?,?,?,?)').bind(id, bookId, name, String(src.icon || '🙂').slice(0, 8), isColor(src.color) ? src.color : '#64748B', 99));
       }
       srcPeople.set(srcId, { ...src, mapped: id });
       return id;

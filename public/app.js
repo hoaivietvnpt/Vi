@@ -314,24 +314,27 @@ function renderReport() {
   // by person (Chi cho / Thu từ)
   const ptype = state.personType;
   $$('#personType button').forEach((b) => b.classList.toggle('on', b.dataset.t === ptype));
-  $('#personTitle').textContent = ptype === 'expense' ? 'Chi cho ai' : 'Thu từ ai';
-  const byP = new Map(); let untagged = 0, ptTotal = 0;
+  const byP = new Map(); let untagged = 0;
   for (const t of list) {
     if (t.type !== ptype) continue;
-    ptTotal += t.amount;
     if (t.person_id && personById(t.person_id)) byP.set(t.person_id, (byP.get(t.person_id) || 0) + t.amount);
     else untagged += t.amount;
   }
-  const prow = [...byP.entries()].map(([id, v]) => ({ p: personById(id), v })).sort((a, b) => b.v - a.v);
-  const pmax = Math.max(1, ...prow.map((r) => r.v));
+  const prow = [...byP.entries()].map(([id, v]) => { const p = personById(id); return { c: { ...p, color: pColor(p) }, v }; }).sort((a, b) => b.v - a.v);
+  const ptTotal = prow.reduce((a, r) => a + r.v, 0);
+  $('#personDonutWrap').hidden = !prow.length;
+  if (prow.length) donut($('#personDonut'), prow, ptTotal, ptype === 'expense' ? 'Chi cho người thân' : 'Thu từ người thân');
   $('#personBreakdown').innerHTML = prow.length
-    ? prow.map((r) => `<button class="cat-row" data-person="${esc(r.p.id)}">
-        <span class="ic" style="background:var(--surface-2)">${esc(r.p.icon)}</span>
-        <span class="nm">${esc(r.p.name)} <small>${ptTotal ? Math.max(1, Math.round((r.v / ptTotal) * 100)) : 0}%</small></span>
+    ? prow.map((r) => {
+        const pc = (r.v / ptTotal) * 100;
+        return `<button class="cat-row" data-person="${esc(r.c.id)}">
+        <span class="ic" style="background:${r.c.color}22">${esc(r.c.icon)}</span>
+        <span class="nm">${esc(r.c.name)} <small>${pc < 1 ? '<1' : Math.round(pc)}%</small></span>
         <span class="am">${nf.format(r.v)}</span>
-        <span class="bar"><i style="width:${Math.max((r.v / pmax) * 100, 1.5)}%;background:var(--${ptype === 'income' ? 'inc' : 'exp'})"></i></span>
-      </button>`).join('') + (untagged ? `<p class="muted small" style="margin-top:8px">Còn ${nf.format(untagged)} ₫ chưa ghi ${ptype === 'expense' ? '“chi cho”' : '“thu từ”'} ai.</p>` : '')
-    : emptyBox(`Chưa có khoản ${ptype === 'expense' ? 'chi cho' : 'thu từ'} người thân trong kỳ này.<br><small>Chọn người khi nhập giao dịch để thống kê ở đây.</small>`);
+        <span class="bar"><i style="width:${Math.max(pc, 1.5)}%;background:${r.c.color}"></i></span>
+      </button>`;
+      }).join('') + (untagged ? `<div class="cat-row untagged"><span class="ic" style="background:var(--surface-2)">👤</span><span class="nm">Không ghi người <small>(của bạn)</small></span><span class="am">${nf.format(untagged)}</span></div>` : '')
+    : emptyBox(`Chưa có khoản ${ptype === 'expense' ? 'chi cho' : 'thu từ'} người thân trong kỳ này.<br><small>Chọn người ở mục “${ptype === 'expense' ? 'Chi cho ai?' : 'Thu từ ai?'}” khi nhập giao dịch.</small>`);
 
   // flow chart
   let buckets = [];
@@ -522,11 +525,16 @@ function renderCatGrid() {
   if (!form.cat || !cats.some((c) => c.id === form.cat)) form.cat = cats[0]?.id || null;
   $('#catGrid').innerHTML = cats.map((c) => `<button class="cat-btn ${c.id === form.cat ? 'on' : ''}" data-cat="${esc(c.id)}"><span class="e" style="background:${c.color}22">${esc(c.icon)}</span><span>${esc(c.name)}</span></button>`).join('');
 }
+const pColor = (p) => (p && /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#64748B');
 function renderPeople() {
-  $('#personLabel').textContent = form.type === 'income' ? 'Thu từ' : 'Chi cho';
+  $('#personLabel').textContent = form.type === 'income' ? 'Thu từ ai?' : 'Chi cho ai?';
   const ppl = state.people.filter((p) => !p.archived || p.id === form.person);
-  $('#personChips').innerHTML = ppl.map((p) => `<button class="${p.id === form.person ? 'on' : ''}" data-person="${esc(p.id)}">${esc(p.icon)} ${esc(p.name)}</button>`).join('')
-    + '<button class="add" data-person-add>＋</button>';
+  // most used (for this type) first, then the saved order
+  const usage = new Map();
+  for (const t of state.txs.slice(0, 500)) if (t.type === form.type && t.person_id) usage.set(t.person_id, (usage.get(t.person_id) || 0) + 1);
+  ppl.sort((a, b) => (usage.get(b.id) || 0) - (usage.get(a.id) || 0) || a.sort - b.sort);
+  $('#personChips').innerHTML = ppl.map((p) => `<button class="${p.id === form.person ? 'on' : ''}" data-person="${esc(p.id)}" style="--pc:${pColor(p)}">${esc(p.icon)} ${esc(p.name)}</button>`).join('')
+    + '<button class="add" data-person-add>＋ Thêm</button>';
 }
 async function quickAddPerson() {
   const p = await personDialog();
@@ -661,19 +669,24 @@ function renderSettings() {
 }
 function renderPeopleManage() {
   const ppl = state.people.filter((p) => !p.archived);
-  $('#peopleManage').innerHTML = ppl.map((p) => `<button class="cat-item" data-pid="${esc(p.id)}"><span class="ic" style="background:var(--surface-2)">${esc(p.icon)}</span><span class="nm">${esc(p.name)}</span><span class="chev">›</span></button>`).join('')
+  $('#peopleManage').innerHTML = ppl.map((p) => `<button class="cat-item" data-pid="${esc(p.id)}"><span class="ic" style="background:${pColor(p)}26">${esc(p.icon)}</span><span class="nm">${esc(p.name)}</span><span class="sw" style="background:${pColor(p)}"></span><span class="chev">›</span></button>`).join('')
     || '<p class="muted small">Chưa có ai.</p>';
 }
+const PEOPLE_PALETTE = ['#2a78d6', '#e87ba4', '#e34948', '#eda100', '#008300', '#eb6834', '#1baf7a', '#A16207', '#6250d6', '#0EA5E9', '#14B8A6', '#64748B'];
 async function personDialog(person) {
+  const used = new Set(state.people.filter((p) => !p.archived && p !== person).map((p) => pColor(p).toLowerCase()));
+  let color = person ? pColor(person) : PEOPLE_PALETTE.find((c) => !used.has(c.toLowerCase())) || PEOPLE_PALETTE[0];
   const r = await modal({
     title: person ? 'Sửa người thân' : 'Thêm người thân',
-    body: `<div class="dlg-row">${field('pIcon', '', person?.icon || '🙂', 'text', 'maxlength="4" style="width:56px;flex:none;text-align:center;font-size:22px"')}${field('pName', 'Tên, vd: Bố, Mẹ, chị Hoa…', person?.name || '', 'text', 'maxlength="30"')}</div>`,
+    body: `<div class="dlg-row">${field('pIcon', '', person?.icon || '🙂', 'text', 'maxlength="4" style="width:56px;flex:none;text-align:center;font-size:22px"')}${field('pName', 'Tên, vd: Bố, Mẹ, chị Hoa…', person?.name || '', 'text', 'maxlength="30"')}</div>
+      <div class="swatches" id="pSwatches">${PEOPLE_PALETTE.map((c) => `<button type="button" style="background:${c}" data-c="${c}" class="${c.toLowerCase() === color.toLowerCase() ? 'on' : ''}" aria-label="Màu ${c}"></button>`).join('')}</div>`,
+    onOpen: () => { $('#pSwatches').onclick = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; color = b.dataset.c; $$('#pSwatches button').forEach((x) => x.classList.toggle('on', x === b)); }; },
     actions: [
       ...(person ? [{ label: 'Xoá', cls: 'ghost danger', run: () => 'delete' }] : []),
       { label: 'Huỷ' },
       { label: 'Lưu', cls: 'primary', run: async () => {
         const name = $('#pName').value.trim(); if (!name) { $('#pName').focus(); return false; }
-        const body = { name, icon: $('#pIcon').value.trim() || '🙂' };
+        const body = { name, icon: $('#pIcon').value.trim() || '🙂', color };
         if (person) { Object.assign(person, await api(bp('/people/' + person.id), { method: 'PUT', body })); return person; }
         const p = await api(bp('/people'), { method: 'POST', body }); state.people.push(p); return p;
       } },

@@ -361,3 +361,16 @@ h1, h2, h3, p { margin: 0; }
 .chip-filter { display: flex; flex-wrap: wrap; gap: 8px; background: none; box-shadow: none; padding: 0; border-radius: 0; }
 .chip-filter > span { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 550; box-shadow: var(--shadow); }
 .seg.small button { white-space: nowrap; }
+
+/* ---------- people v2: colours ---------- */
+.person-sec { margin: 0 0 8px; }
+.person-head { display: flex; align-items: baseline; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text-2); margin: 0 2px 6px; }
+.person-head .muted { font-weight: 500; font-size: 12px; }
+.person-chips button { --pc: #64748B; background: color-mix(in srgb, var(--pc) 13%, var(--surface)); color: var(--text); border: 1.5px solid transparent; }
+.person-chips button .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pc); flex: none; }
+.person-chips button.on { background: var(--pc); border-color: var(--pc); color: #fff; box-shadow: 0 2px 8px color-mix(in srgb, var(--pc) 40%, transparent); }
+.sheet[data-type="income"] .person-chips button.on { border-color: var(--pc); color: #fff; }
+.person-chips button.on .dot { background: #fff; }
+.person-chips button.add { background: var(--surface-2); color: var(--muted); border: 1.5px dashed var(--line); }
+#personType { margin-bottom: 4px; }
+.cat-row.untagged .nm, .cat-row.untagged .am { color: var(--muted); font-weight: 550; }

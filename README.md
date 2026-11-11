@@ -25,7 +25,7 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
   Quản trị người dùng, admin **đặt lại mật khẩu** → app tạo mật khẩu tạm; người dùng đăng nhập bằng mật khẩu tạm sẽ
   bị yêu cầu đặt mật khẩu mới ngay.
 - **Chi cho / Thu từ**: khi nhập giao dịch có thể chọn người liên quan (Bố, Mẹ, Vợ/Chồng, Con, Anh, Chị, Em, Ông bà,
-  Bạn bè… hoặc thêm nhanh bằng nút ＋). Báo cáo có phần *Chi cho ai / Thu từ ai*, chạm để lọc sổ theo người.
+  Bạn bè… hoặc thêm nhanh bằng nút ＋). Mỗi người có một màu riêng; Báo cáo có thẻ *Người thân* với biểu đồ vòng tròn Chi cho ai / Thu từ ai, chạm để lọc sổ theo người.
   Danh sách người quản lý trong Cài đặt → Người thân (riêng cho từng sổ).
 
 ## Thêm vào màn hình chính iPhone
@@ -40,7 +40,7 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
 src/worker.js        API (/api/auth, /api/me, /api/books/:id/...) + phục vụ file tĩnh
 src/static.js        Nhúng các file trong public/ vào Worker
 public/              index.html, style.css, app.js, sw.js, manifest, icons
-migrations/          Schema D1 (0001 dữ liệu, 0002 tài khoản/sổ/thành viên, 0003 admin, 0004 người thân)
+migrations/          Schema D1 (0001 dữ liệu, 0002 tài khoản/sổ/thành viên, 0003 admin, 0004 người thân, 0005 màu người thân)
 wrangler.jsonc       Cấu hình Worker, D1 (vi-db), custom domain vi.nhv.me
 ```
 
