@@ -540,11 +540,17 @@ function renderDate() {
   $('#datePickLabel').textContent = other ? '📅 ' + form.date.split('-').reverse().join('/') : '📅 Ngày khác';
   $('#dateInput').value = form.date;
 }
+const lastKey = (what, type) => `last:${state.bookId}:${what}:${type}`;
 function setType(type) {
   form.type = type;
   sheet.dataset.type = type;
   $$('#typeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.type === type));
-  form.cat = LS.get('lastCat:' + type, null);
+  // new entries default to the last choices made for this book & type
+  form.cat = LS.get(lastKey('cat', type), null);
+  if (!form.id) {
+    const p = LS.get(lastKey('person', type), null);
+    form.person = p && state.people.some((x) => x.id === p && !x.archived) ? p : null;
+  }
   renderCatGrid(); renderPeople();
 }
 function openSheet(tx) {
@@ -552,9 +558,8 @@ function openSheet(tx) {
   form.expr = tx ? String(tx.amount) : '';
   form.note = tx?.note || '';
   form.date = tx?.date || ymd(new Date());
-  form.person = tx?.person_id || null;
-  setType(tx?.type || LS.get('lastType', 'expense'));
-  if (tx) { form.cat = tx.category_id; renderCatGrid(); }
+  setType(tx?.type || LS.get('last:' + state.bookId + ':type', 'expense'));
+  if (tx) { form.cat = tx.category_id; form.person = tx.person_id || null; renderCatGrid(); renderPeople(); }
   $('#noteInput').value = form.note;
   $('#sheetDelete').hidden = !tx;
   $('#sheetSpacer').hidden = !!tx;
@@ -597,7 +602,11 @@ function save(keepOpen = false) {
   if (!amount) { const d = $('#amountDisplay'); d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); haptic(30); return; }
   if (!form.cat) return toast('Hãy chọn danh mục');
   const body = { type: form.type, amount, category_id: form.cat, person_id: form.person, note: $('#noteInput').value.trim(), date: form.date };
-  LS.set('lastType', form.type); LS.set('lastCat:' + form.type, form.cat);
+  if (!form.id) {
+    LS.set('last:' + state.bookId + ':type', form.type);
+    LS.set(lastKey('cat', form.type), form.cat);
+    LS.set(lastKey('person', form.type), form.person);
+  }
   if (form.id) {
     const t = state.txs.find((x) => x.id === form.id);
     Object.assign(t, body, { updated_at: Date.now() });
