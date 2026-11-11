@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <title>Ví – Thu chi hằng ngày</title>
+  <meta name="description" content="Quản lý thu chi hằng ngày, nhanh gọn và trực quan." />
+  <meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Ví" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/style.css?v=2" />
+</head>
+<body>
+  <div id="app">
+    <!-- Login -->
+    <section id="login" class="login" hidden>
+      <div class="login-card">
+        <img src="/icons/icon.svg" alt="" width="72" height="72" class="login-logo" />
+        <h1>Ví</h1>
+        <p class="muted">Nhập mật khẩu để tiếp tục</p>
+        <form id="loginForm">
+          <input id="pw" type="password" autocomplete="current-password" placeholder="Mật khẩu" required />
+          <button class="btn primary block" type="submit">Mở khoá</button>
+          <p id="loginErr" class="err" role="alert"></p>
+        </form>
+      </div>
+    </section>
+
+    <main id="main" hidden>
+      <!-- HOME -->
+      <section class="view" data-view="home">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="homeDate"></p>
+            <h1 class="title">Tổng quan</h1>
+          </div>
+          <span id="syncBadge" class="sync" hidden title="Đang chờ đồng bộ"></span>
+        </header>
+
+        <div class="card balance">
+          <div class="balance-head">
+            <span class="muted" id="homeMonthLabel">Tháng này</span>
+          </div>
+          <p class="balance-label">Còn lại</p>
+          <p class="balance-amount" id="homeBalance">0 ₫</p>
+          <div class="balance-split">
+            <div><span class="dot inc"></span><span class="muted">Thu</span><b id="homeIncome">0</b></div>
+            <div><span class="dot exp"></span><span class="muted">Chi</span><b id="homeExpense">0</b></div>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="card stat">
+            <p class="muted">Hôm nay chi</p>
+            <p class="stat-num" id="todaySpent">0 ₫</p>
+          </div>
+          <div class="card stat">
+            <p class="muted">TB mỗi ngày</p>
+            <p class="stat-num" id="avgSpent">0 ₫</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Chi tiêu 7 ngày qua</h2><span class="muted small" id="weekTotal"></span></div>
+          <div id="weekChart" class="chart"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Gần đây</h2><button class="link" data-goto="list">Xem tất cả</button></div>
+          <div id="recentList"></div>
+        </div>
+      </section>
+
+      <!-- LIST -->
+      <section class="view" data-view="list" hidden>
+        <header class="topbar">
+          <h1 class="title">Sổ thu chi</h1>
+        </header>
+        <div class="period-nav">
+          <button class="icon-btn" data-list-nav="-1" aria-label="Tháng trước">‹</button>
+          <button class="period-label" id="listMonthLabel"></button>
+          <button class="icon-btn" data-list-nav="1" aria-label="Tháng sau">›</button>
+        </div>
+        <div class="search">
+          <input id="searchInput" type="search" placeholder="Tìm ghi chú, danh mục…" />
+        </div>
+        <div class="seg" id="listFilter">
+          <button class="on" data-f="all">Tất cả</button>
+          <button data-f="expense">Chi</button>
+          <button data-f="income">Thu</button>
+        </div>
+        <div id="activeCat" class="chip-filter" hidden></div>
+        <div class="list-summary" id="listSummary"></div>
+        <div id="txList"></div>
+      </section>
+
+      <!-- REPORT -->
+      <section class="view" data-view="report" hidden>
+        <header class="topbar">
+          <h1 class="title">Báo cáo</h1>
+        </header>
+        <div class="seg" id="reportMode">
+          <button data-m="week">Tuần</button>
+          <button class="on" data-m="month">Tháng</button>
+          <button data-m="year">Năm</button>
+        </div>
+        <div class="period-nav">
+          <button class="icon-btn" data-rep-nav="-1" aria-label="Kỳ trước">‹</button>
+          <span class="period-label" id="repLabel"></span>
+          <button class="icon-btn" data-rep-nav="1" aria-label="Kỳ sau">›</button>
+        </div>
+
+        <div class="grid3">
+          <div class="card mini"><p class="muted">Thu</p><p class="mini-num inc-t" id="repIncome">0</p><p class="delta" id="repIncomeDelta"></p></div>
+          <div class="card mini"><p class="muted">Chi</p><p class="mini-num exp-t" id="repExpense">0</p><p class="delta" id="repExpenseDelta"></p></div>
+          <div class="card mini"><p class="muted">Chênh lệch</p><p class="mini-num" id="repNet">0</p><p class="delta" id="repSave"></p></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Cơ cấu</h2>
+            <div class="seg small" id="donutType">
+              <button class="on" data-t="expense">Chi</button>
+              <button data-t="income">Thu</button>
+            </div>
+          </div>
+          <div class="donut-wrap">
+            <div id="donut" class="donut"></div>
+          </div>
+          <div id="catBreakdown"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2 id="flowTitle">Dòng tiền</h2></div>
+          <div class="legend">
+            <span><i class="sw inc"></i>Thu</span><span><i class="sw exp"></i>Chi</span>
+          </div>
+          <div id="flowChart" class="chart tall"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Xu hướng 6 tháng</h2></div>
+          <div class="legend">
+            <span><i class="sw inc"></i>Thu</span><span><i class="sw exp"></i>Chi</span>
+          </div>
+          <div id="trendChart" class="chart tall"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Điểm nhấn</h2></div>
+          <ul class="facts" id="facts"></ul>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" data-view="settings" hidden>
+        <header class="topbar"><h1 class="title">Cài đặt</h1></header>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Danh mục</h2>
+            <div class="seg small" id="catType">
+              <button class="on" data-t="expense">Chi</button>
+              <button data-t="income">Thu</button>
+            </div>
+          </div>
+          <div id="catManage"></div>
+          <button class="btn ghost block" id="addCatBtn">＋ Thêm danh mục</button>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Dữ liệu</h2></div>
+          <div class="rows">
+            <button class="row-btn" id="exportCsv"><span>📄</span>Xuất CSV (Excel)</button>
+            <button class="row-btn" id="exportJson"><span>💾</span>Sao lưu JSON</button>
+            <label class="row-btn"><span>📥</span>Khôi phục từ JSON<input type="file" id="importJson" accept="application/json,.json" hidden /></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Thêm vào màn hình chính</h2></div>
+          <ol class="howto">
+            <li>Mở <b>vi.nhv.me</b> bằng <b>Safari</b> trên iPhone.</li>
+            <li>Bấm nút <b>Chia sẻ</b> <span class="kbd">⬆︎</span> ở thanh dưới.</li>
+            <li>Chọn <b>Thêm vào MH chính</b> rồi bấm <b>Thêm</b>.</li>
+          </ol>
+        </div>
+
+        <div class="card" id="logoutCard" hidden>
+          <button class="btn ghost danger block" id="logoutBtn">Đăng xuất</button>
+        </div>
+        <p class="muted center small">Ví · v1.0</p>
+      </section>
+    </main>
+
+    <!-- Tab bar -->
+    <nav class="tabbar" id="tabbar" hidden>
+      <button data-tab="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Tổng quan</span></button>
+      <button data-tab="list"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Sổ</span></button>
+      <button class="fab" id="fab" aria-label="Thêm giao dịch"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button data-tab="report"><svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>Báo cáo</span></button>
+      <button data-tab="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Cài đặt</span></button>
+    </nav>
+
+    <!-- Add / edit sheet -->
+    <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+    <div class="sheet" id="sheet" aria-hidden="true" role="dialog" aria-label="Giao dịch">
+      <div class="grabber"></div>
+      <div class="sheet-top">
+        <button class="link" id="sheetCancel">Huỷ</button>
+        <div class="seg type-seg" id="typeSeg">
+          <button class="on" data-type="expense">Khoản chi</button>
+          <button data-type="income">Khoản thu</button>
+        </div>
+        <button class="link danger" id="sheetDelete" hidden>Xoá</button>
+        <span class="spacer" id="sheetSpacer"></span>
+      </div>
+
+      <div class="amount-display" id="amountDisplay">
+        <span id="amountText">0</span><span class="cur">₫</span>
+      </div>
+      <p class="amount-words" id="amountWords">&nbsp;</p>
+
+      <div class="cat-grid" id="catGrid"></div>
+
+      <div class="meta-row">
+        <div class="date-chips" id="dateChips">
+          <button data-d="0" class="on">Hôm nay</button>
+          <button data-d="-1">Hôm qua</button>
+          <label class="date-pick"><span id="datePickLabel">📅 Ngày khác</span><input type="date" id="dateInput" /></label>
+        </div>
+      </div>
+      <input class="note-input" id="noteInput" maxlength="200" placeholder="Ghi chú (tuỳ chọn)" enterkeyhint="done" />
+
+      <div class="keypad" id="keypad">
+        <button>1</button><button>2</button><button>3</button><button data-k="back" aria-label="Xoá">⌫</button>
+        <button>4</button><button>5</button><button>6</button><button data-k="+" class="op">＋</button>
+        <button>7</button><button>8</button><button>9</button><button data-k="-" class="op">－</button>
+        <button data-k="000">000</button><button>0</button><button data-k="C" class="op">C</button>
+        <button data-k="save" class="save" id="saveBtn">Lưu</button>
+      </div>
+    </div>
+
+    <!-- Category editor dialog -->
+    <div class="sheet-backdrop" id="dlgBackdrop" hidden></div>
+    <div class="dialog" id="catDialog" hidden role="dialog" aria-label="Danh mục">
+      <h3 id="catDlgTitle">Danh mục</h3>
+      <div class="dlg-row">
+        <input id="catIcon" class="icon-input" maxlength="4" />
+        <input id="catName" placeholder="Tên danh mục" maxlength="40" />
+      </div>
+      <div class="swatches" id="swatches"></div>
+      <div class="dlg-actions">
+        <button class="btn ghost danger" id="catDelete">Xoá</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="catCancel">Huỷ</button>
+        <button class="btn primary" id="catSave">Lưu</button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+    <div class="tooltip" id="tip" hidden></div>
+  </div>
+  <script src="/app.js?v=2" defer></script>
+</body>
+</html>
