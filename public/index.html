@@ -15,7 +15,7 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=4" />
+  <link rel="stylesheet" href="/style.css?v=5" />
 </head>
 <body>
   <div id="app">
@@ -52,12 +52,6 @@
           <span id="syncBadge" class="sync" hidden title="Đang chờ đồng bộ"></span>
           <button class="book-pill" data-book-switch><span class="bp-ic"></span><span class="bp-name"></span><span class="chev">▾</span></button>
         </header>
-
-        <div class="card notice" id="recoveryNotice" hidden>
-          <span class="notice-ic">🛟</span>
-          <div class="notice-main"><b>Tạo mã khôi phục</b><span class="muted small">Dùng để tự lấy lại tài khoản khi quên mật khẩu.</span></div>
-          <button class="btn primary sm" id="recoveryNoticeBtn">Tạo</button>
-        </div>
 
         <div class="card balance">
           <div class="balance-head">
@@ -155,6 +149,17 @@
         </div>
 
         <div class="card">
+          <div class="card-head">
+            <h2 id="personTitle">Chi cho ai</h2>
+            <div class="seg small" id="personType">
+              <button class="on" data-t="expense">Chi cho</button>
+              <button data-t="income">Thu từ</button>
+            </div>
+          </div>
+          <div id="personBreakdown"></div>
+        </div>
+
+        <div class="card">
           <div class="card-head"><h2 id="flowTitle">Dòng tiền</h2></div>
           <div class="legend">
             <span><i class="sw inc"></i>Thu</span><span><i class="sw exp"></i>Chi</span>
@@ -194,7 +199,6 @@
           <div class="rows">
             <button class="row-btn" id="editNameBtn"><span>✏️</span>Đổi tên hiển thị</button>
             <button class="row-btn" id="changePwBtn"><span>🔑</span>Đổi mật khẩu</button>
-            <button class="row-btn" id="recoveryBtn"><span>🛟</span>Mã khôi phục<em class="row-note" id="recoveryState"></em></button>
             <button class="row-btn danger" id="logoutBtn"><span>🚪</span>Đăng xuất</button>
           </div>
         </div>
@@ -237,6 +241,12 @@
         </div>
 
         <div class="card">
+          <div class="card-head"><h2>Người thân</h2><span class="muted small">Chi cho / Thu từ</span></div>
+          <div id="peopleManage"></div>
+          <button class="btn ghost block" id="addPersonBtn">＋ Thêm người</button>
+        </div>
+
+        <div class="card">
           <div class="card-head"><h2>Dữ liệu</h2></div>
           <div class="rows">
             <button class="row-btn" id="exportCsv"><span>📄</span>Xuất CSV (Excel)</button>
@@ -260,7 +270,7 @@
           </ol>
         </div>
 
-        <p class="muted center small">Ví · v2.1</p>
+        <p class="muted center small">Ví · v2.2</p>
       </section>
     </main>
 
@@ -293,6 +303,11 @@
       <p class="amount-words" id="amountWords">&nbsp;</p>
 
       <div class="cat-grid" id="catGrid"></div>
+
+      <div class="person-row">
+        <span class="person-label" id="personLabel">Chi cho</span>
+        <div class="person-chips" id="personChips"></div>
+      </div>
 
       <div class="meta-row">
         <div class="date-chips" id="dateChips">
@@ -341,6 +356,6 @@
     <div class="toast" id="toast" role="status"></div>
     <div class="tooltip" id="tip" hidden></div>
   </div>
-  <script src="/app.js?v=4" defer></script>
+  <script src="/app.js?v=5" defer></script>
 </body>
 </html>

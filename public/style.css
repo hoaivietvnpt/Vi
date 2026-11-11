@@ -348,3 +348,16 @@ h1, h2, h3, p { margin: 0; }
 .kv span { color: var(--muted); }
 .kv b { font-weight: 600; text-align: right; word-break: break-all; }
 .dlg-actions.stack .btn { flex: none; height: 46px; }
+
+/* ---------- people (Chi cho / Thu từ) ---------- */
+.person-row { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px; }
+.person-label { font-size: 13px; font-weight: 650; color: var(--muted); white-space: nowrap; flex: none; min-width: 48px; }
+.person-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 1; padding: 2px 0; }
+.person-chips::-webkit-scrollbar { display: none; }
+.person-chips button { flex: none; height: 32px; padding: 0 11px 0 8px; border-radius: 999px; background: var(--surface-2); font-size: 13.5px; font-weight: 600; color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; border: 1.5px solid transparent; transition: background .15s; }
+.person-chips button.on { background: var(--surface); border-color: var(--text); color: var(--text); }
+.person-chips button.add { color: var(--muted); padding: 0 12px; }
+.sheet[data-type="income"] .person-chips button.on { border-color: var(--inc-text); color: var(--inc-text); }
+.chip-filter { display: flex; flex-wrap: wrap; gap: 8px; background: none; box-shadow: none; padding: 0; border-radius: 0; }
+.chip-filter > span { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 550; box-shadow: var(--shadow); }
+.seg.small button { white-space: nowrap; }

@@ -16,6 +16,9 @@ const state = {
   members: [],
   txs: [],
   cats: [],
+  people: [],
+  listPerson: null,
+  personType: 'expense',
   outbox: LS.get('outbox', []),
   tab: 'home',
   listMonth: monthStart(new Date()),
@@ -93,11 +96,12 @@ async function api(path, opts = {}) {
 function persist() {
   LS.set('outbox', state.outbox);
   if (!state.bookId) return;
-  LS.set('txs:' + state.bookId, state.txs); LS.set('cats:' + state.bookId, state.cats); LS.set('members:' + state.bookId, state.members);
+  LS.set('txs:' + state.bookId, state.txs); LS.set('cats:' + state.bookId, state.cats); LS.set('members:' + state.bookId, state.members); LS.set('people:' + state.bookId, state.people);
 }
 function loadCache() {
   state.txs = LS.get('txs:' + state.bookId, []);
   state.cats = LS.get('cats:' + state.bookId, []);
+  state.people = LS.get('people:' + state.bookId, []);
   state.members = LS.get('members:' + state.bookId, []);
 }
 const bp = (p) => `/books/${state.bookId}${p}`;
@@ -132,9 +136,9 @@ function updateSync() { $('#syncBadge').hidden = !state.outbox.length; }
 
 async function loadAll() {
   const bookId = state.bookId;
-  const [cats, txs, members] = await Promise.all([api(bp('/categories')), api(bp('/transactions')), api(bp('/members'))]);
+  const [cats, txs, members, people] = await Promise.all([api(bp('/categories')), api(bp('/transactions')), api(bp('/members')), api(bp('/people'))]);
   if (bookId !== state.bookId) return; // switched meanwhile
-  state.cats = cats; state.members = members;
+  state.cats = cats; state.members = members; state.people = people;
   // keep pending local creates that the server doesn't have yet
   const mine = state.outbox.filter((o) => o.path.startsWith(bp('/transactions')));
   const pendingIds = new Set(mine.filter((o) => o.method !== 'DELETE').map((o) => o.body?.id || o.path.split('/').pop()));
@@ -145,6 +149,8 @@ async function loadAll() {
   sortTxs(); persist();
 }
 const sortTxs = () => state.txs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created_at || 0) - (a.created_at || 0)));
+const personById = (id) => state.people.find((p) => p.id === id) || null;
+const personPhrase = (t) => { const p = t.person_id && personById(t.person_id); return p ? `${p.icon} ${t.type === 'income' ? 'từ' : 'cho'} ${p.name}` : ''; };
 const catById = (id) => state.cats.find((c) => c.id === id) || { id, name: 'Khác', icon: '📦', color: '#8a8984', type: 'expense' };
 
 /* ---------- aggregation ---------- */
@@ -166,14 +172,14 @@ function render() {
   if (state.tab === 'list') renderList();
   if (state.tab === 'report') renderReport();
   if (state.tab === 'settings') renderSettings();
-  if (sheet.classList.contains('open')) renderCatGrid();
+  if (sheet.classList.contains('open')) { renderCatGrid(); renderPeople(); }
 }
 
 /* ---------- transaction row ---------- */
 function txRow(t) {
   const c = catById(t.category_id);
   const who = isShared() && t.created_by ? memberName(t.created_by) : '';
-  const sub = [who && `<span class="tx-who">${esc(who)}</span>`, t.note && esc(t.note)].filter(Boolean).join(' · ');
+  const sub = [who && `<span class="tx-who">${esc(who)}</span>`, personPhrase(t) && esc(personPhrase(t)), t.note && esc(t.note)].filter(Boolean).join(' · ');
   return `<button class="tx" data-id="${esc(t.id)}">
     <span class="tx-ic" style="background:${c.color}1f">${esc(c.icon)}</span>
     <span class="tx-main"><span class="tx-cat">${esc(c.name)}</span>${sub ? `<span class="tx-note">${sub}</span>` : ''}</span>
@@ -190,7 +196,6 @@ const emptyBox = (msg) => `<div class="empty"><span class="big">🌱</span>${msg
 /* ---------- HOME ---------- */
 function renderHome() {
   const now = new Date();
-  $('#recoveryNotice').hidden = !state.user || !!state.user.has_recovery;
   $('#homeDate').textContent = now.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long' });
   const ms = monthStart(now), me = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   const list = inRange(ms, me);
@@ -222,15 +227,16 @@ function renderList() {
   let list = inRange(ms, me);
   if (state.listFilter !== 'all') list = list.filter((t) => t.type === state.listFilter);
   if (state.listCat) list = list.filter((t) => t.category_id === state.listCat);
+  if (state.listPerson) list = list.filter((t) => t.person_id === state.listPerson);
   const q = state.search.trim().toLowerCase();
-  if (q) list = list.filter((t) => (t.note + ' ' + catById(t.category_id).name).toLowerCase().includes(q));
+  if (q) list = list.filter((t) => (t.note + ' ' + catById(t.category_id).name + ' ' + (personById(t.person_id)?.name || '')).toLowerCase().includes(q));
 
   const ac = $('#activeCat');
-  if (state.listCat) {
-    const c = catById(state.listCat);
-    ac.hidden = false;
-    ac.innerHTML = `${esc(c.icon)} ${esc(c.name)} <button aria-label="Bỏ lọc">✕</button>`;
-  } else ac.hidden = true;
+  const chips = [];
+  if (state.listCat) { const c = catById(state.listCat); chips.push(`<span>${esc(c.icon)} ${esc(c.name)} <button data-clear="cat" aria-label="Bỏ lọc">✕</button></span>`); }
+  if (state.listPerson) { const p = personById(state.listPerson); chips.push(`<span>${esc(p?.icon || '')} ${esc(p?.name || '')} <button data-clear="person" aria-label="Bỏ lọc">✕</button></span>`); }
+  ac.hidden = !chips.length;
+  ac.innerHTML = chips.join('');
 
   const inc = sum(list, 'income'), exp = sum(list, 'expense');
   $('#listSummary').innerHTML = `<span>${list.length} giao dịch</span><span>Thu <b class="inc-t">${nf.format(inc)}</b></span><span>Chi <b class="exp-t">${nf.format(exp)}</b></span>`;
@@ -304,6 +310,28 @@ function renderReport() {
         </button>`;
       }).join('')
     : emptyBox('Chưa có dữ liệu trong kỳ này.');
+
+  // by person (Chi cho / Thu từ)
+  const ptype = state.personType;
+  $$('#personType button').forEach((b) => b.classList.toggle('on', b.dataset.t === ptype));
+  $('#personTitle').textContent = ptype === 'expense' ? 'Chi cho ai' : 'Thu từ ai';
+  const byP = new Map(); let untagged = 0, ptTotal = 0;
+  for (const t of list) {
+    if (t.type !== ptype) continue;
+    ptTotal += t.amount;
+    if (t.person_id && personById(t.person_id)) byP.set(t.person_id, (byP.get(t.person_id) || 0) + t.amount);
+    else untagged += t.amount;
+  }
+  const prow = [...byP.entries()].map(([id, v]) => ({ p: personById(id), v })).sort((a, b) => b.v - a.v);
+  const pmax = Math.max(1, ...prow.map((r) => r.v));
+  $('#personBreakdown').innerHTML = prow.length
+    ? prow.map((r) => `<button class="cat-row" data-person="${esc(r.p.id)}">
+        <span class="ic" style="background:var(--surface-2)">${esc(r.p.icon)}</span>
+        <span class="nm">${esc(r.p.name)} <small>${ptTotal ? Math.max(1, Math.round((r.v / ptTotal) * 100)) : 0}%</small></span>
+        <span class="am">${nf.format(r.v)}</span>
+        <span class="bar"><i style="width:${Math.max((r.v / pmax) * 100, 1.5)}%;background:var(--${ptype === 'income' ? 'inc' : 'exp'})"></i></span>
+      </button>`).join('') + (untagged ? `<p class="muted small" style="margin-top:8px">Còn ${nf.format(untagged)} ₫ chưa ghi ${ptype === 'expense' ? '“chi cho”' : '“thu từ”'} ai.</p>` : '')
+    : emptyBox(`Chưa có khoản ${ptype === 'expense' ? 'chi cho' : 'thu từ'} người thân trong kỳ này.<br><small>Chọn người khi nhập giao dịch để thống kê ở đây.</small>`);
 
   // flow chart
   let buckets = [];
@@ -463,7 +491,7 @@ function donut(el, rows, total, label) {
 
 /* ---------- ADD / EDIT SHEET ---------- */
 
-const form = { id: null, type: 'expense', expr: '', cat: null, date: ymd(new Date()), note: '' };
+const form = { id: null, type: 'expense', expr: '', cat: null, person: null, date: ymd(new Date()), note: '' };
 
 function evalExpr(expr) {
   const tokens = expr.match(/\d+|[+-]/g) || [];
@@ -494,6 +522,16 @@ function renderCatGrid() {
   if (!form.cat || !cats.some((c) => c.id === form.cat)) form.cat = cats[0]?.id || null;
   $('#catGrid').innerHTML = cats.map((c) => `<button class="cat-btn ${c.id === form.cat ? 'on' : ''}" data-cat="${esc(c.id)}"><span class="e" style="background:${c.color}22">${esc(c.icon)}</span><span>${esc(c.name)}</span></button>`).join('');
 }
+function renderPeople() {
+  $('#personLabel').textContent = form.type === 'income' ? 'Thu từ' : 'Chi cho';
+  const ppl = state.people.filter((p) => !p.archived || p.id === form.person);
+  $('#personChips').innerHTML = ppl.map((p) => `<button class="${p.id === form.person ? 'on' : ''}" data-person="${esc(p.id)}">${esc(p.icon)} ${esc(p.name)}</button>`).join('')
+    + '<button class="add" data-person-add>＋</button>';
+}
+async function quickAddPerson() {
+  const p = await personDialog();
+  if (p?.id) { form.person = p.id; renderPeople(); }
+}
 function renderDate() {
   const today = ymd(new Date()), yest = ymd(addDays(new Date(), -1));
   $$('#dateChips button').forEach((b) => b.classList.toggle('on', ymd(addDays(new Date(), +b.dataset.d)) === form.date));
@@ -507,13 +545,14 @@ function setType(type) {
   sheet.dataset.type = type;
   $$('#typeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.type === type));
   form.cat = LS.get('lastCat:' + type, null);
-  renderCatGrid();
+  renderCatGrid(); renderPeople();
 }
 function openSheet(tx) {
   form.id = tx?.id || null;
   form.expr = tx ? String(tx.amount) : '';
   form.note = tx?.note || '';
   form.date = tx?.date || ymd(new Date());
+  form.person = tx?.person_id || null;
   setType(tx?.type || LS.get('lastType', 'expense'));
   if (tx) { form.cat = tx.category_id; renderCatGrid(); }
   $('#noteInput').value = form.note;
@@ -523,6 +562,7 @@ function openSheet(tx) {
   $('#sheetBackdrop').hidden = false;
   requestAnimationFrame(() => { $('#sheetBackdrop').classList.add('show'); sheet.classList.add('open'); sheet.setAttribute('aria-hidden', 'false'); });
   $('#catGrid').scrollLeft = 0;
+  const on = $('#personChips .on'); $('#personChips').scrollLeft = on ? on.offsetLeft - 60 : 0;
   history.pushState({ sheet: 1 }, '');
 }
 function closeSheet(fromPop) {
@@ -556,7 +596,7 @@ function save(keepOpen = false) {
   const amount = evalExpr(form.expr);
   if (!amount) { const d = $('#amountDisplay'); d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); haptic(30); return; }
   if (!form.cat) return toast('Hãy chọn danh mục');
-  const body = { type: form.type, amount, category_id: form.cat, note: $('#noteInput').value.trim(), date: form.date };
+  const body = { type: form.type, amount, category_id: form.cat, person_id: form.person, note: $('#noteInput').value.trim(), date: form.date };
   LS.set('lastType', form.type); LS.set('lastCat:' + form.type, form.cat);
   if (form.id) {
     const t = state.txs.find((x) => x.id === form.id);
@@ -582,12 +622,11 @@ function removeTx() {
 /* ---------- SETTINGS ---------- */
 const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#0EA5E9', '#14B8A6', '#A16207', '#64748B'];
 function renderSettings() {
+  renderPeopleManage();
   const u = state.user || {};
   $('#accAvatar').textContent = initials(u.name);
   $('#accName').textContent = u.name || '';
   $('#accEmail').textContent = u.email || '';
-  $('#recoveryState').textContent = u.has_recovery ? 'Đã tạo' : 'Chưa tạo';
-  $('#recoveryState').classList.toggle('warn', !u.has_recovery);
   const wasHidden = $('#adminCard').hidden;
   $('#adminCard').hidden = !u.is_admin;
   if (u.is_admin && wasHidden) loadAdminUsers();
@@ -611,6 +650,37 @@ function renderSettings() {
   const cats = state.cats.filter((c) => c.type === state.catType && !c.archived);
   $('#catManage').innerHTML = cats.map((c) => `<button class="cat-item" data-cat="${esc(c.id)}"><span class="ic" style="background:${c.color}22">${esc(c.icon)}</span><span class="nm">${esc(c.name)}</span><span class="chev">›</span></button>`).join('');
 }
+function renderPeopleManage() {
+  const ppl = state.people.filter((p) => !p.archived);
+  $('#peopleManage').innerHTML = ppl.map((p) => `<button class="cat-item" data-pid="${esc(p.id)}"><span class="ic" style="background:var(--surface-2)">${esc(p.icon)}</span><span class="nm">${esc(p.name)}</span><span class="chev">›</span></button>`).join('')
+    || '<p class="muted small">Chưa có ai.</p>';
+}
+async function personDialog(person) {
+  const r = await modal({
+    title: person ? 'Sửa người thân' : 'Thêm người thân',
+    body: `<div class="dlg-row">${field('pIcon', '', person?.icon || '🙂', 'text', 'maxlength="4" style="width:56px;flex:none;text-align:center;font-size:22px"')}${field('pName', 'Tên, vd: Bố, Mẹ, chị Hoa…', person?.name || '', 'text', 'maxlength="30"')}</div>`,
+    actions: [
+      ...(person ? [{ label: 'Xoá', cls: 'ghost danger', run: () => 'delete' }] : []),
+      { label: 'Huỷ' },
+      { label: 'Lưu', cls: 'primary', run: async () => {
+        const name = $('#pName').value.trim(); if (!name) { $('#pName').focus(); return false; }
+        const body = { name, icon: $('#pIcon').value.trim() || '🙂' };
+        if (person) { Object.assign(person, await api(bp('/people/' + person.id), { method: 'PUT', body })); return person; }
+        const p = await api(bp('/people'), { method: 'POST', body }); state.people.push(p); return p;
+      } },
+    ],
+  });
+  if (r === 'delete') {
+    if (!confirm(`Xoá "${person.name}" khỏi danh sách? Giao dịch cũ vẫn được giữ.`)) return null;
+    try {
+      const res = await api(bp('/people/' + person.id), { method: 'DELETE' });
+      if (res.archived) person.archived = 1; else state.people = state.people.filter((p) => p !== person);
+    } catch (e) { toast(e.message); }
+  }
+  persist(); render();
+  return r && r !== 'delete' ? r : null;
+}
+
 let editingCat = null;
 function openCatDialog(cat) {
   editingCat = cat || { type: state.catType, icon: '🏷️', color: PALETTE[0], name: '' };
@@ -647,12 +717,12 @@ function download(name, content, type) {
 }
 function exportCsv() {
   const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
-  const lines = ['Ngày,Loại,Danh mục,Số tiền,Ghi chú'];
-  for (const t of [...state.txs].reverse()) lines.push([t.date, t.type === 'income' ? 'Thu' : 'Chi', q(catById(t.category_id).name), t.amount, q(t.note || '')].join(','));
+  const lines = ['Ngày,Loại,Danh mục,Chi cho / Thu từ,Số tiền,Ghi chú'];
+  for (const t of [...state.txs].reverse()) lines.push([t.date, t.type === 'income' ? 'Thu' : 'Chi', q(catById(t.category_id).name), q(personById(t.person_id)?.name || ''), t.amount, q(t.note || '')].join(','));
   download(`vi-thu-chi-${ymd(new Date())}.csv`, '﻿' + lines.join('\n'), 'text/csv;charset=utf-8');
 }
 function exportJson() {
-  download(`vi-backup-${ymd(new Date())}.json`, JSON.stringify({ version: 2, book: curBook()?.name, exported_at: new Date().toISOString(), categories: state.cats, transactions: state.txs }, null, 1), 'application/json');
+  download(`vi-backup-${ymd(new Date())}.json`, JSON.stringify({ version: 2, book: curBook()?.name, exported_at: new Date().toISOString(), categories: state.cats, people: state.people, transactions: state.txs }, null, 1), 'application/json');
 }
 async function importJson(file) {
   try {
@@ -660,7 +730,7 @@ async function importJson(file) {
     const txs = Array.isArray(data) ? data : data.transactions;
     if (!Array.isArray(txs)) throw new Error();
     if (!confirm(`Nhập ${txs.length} giao dịch? (Giao dịch trùng sẽ được bỏ qua)`)) return;
-    const r = await api(bp('/import'), { method: 'POST', body: { transactions: txs, categories: data.categories || [] } });
+    const r = await api(bp('/import'), { method: 'POST', body: { transactions: txs, categories: data.categories || [], people: data.people || [] } });
     await loadAll(); render(); toast(`Đã nhập ${r.imported} giao dịch`);
   } catch (e) { toast(e.auth ? 'Hết phiên đăng nhập' : 'File không hợp lệ hoặc mất mạng'); }
 }
@@ -705,7 +775,7 @@ const field = (id, ph, val = '', type = 'text', extra = '') => `<input class="mo
 async function switchBook(id) {
   if (id === state.bookId) return;
   state.bookId = id; LS.set('bookId', id);
-  loadCache(); state.listCat = null; render();
+  loadCache(); state.listCat = null; state.listPerson = null; render();
   try { await loadAll(); render(); } catch (e) { if (e.auth) showLogin(); }
 }
 async function refreshMe() {
@@ -761,7 +831,7 @@ async function shareInvite() {
   } catch {}
 }
 
-/* ---------- recovery code ---------- */
+/* ---------- secrets & password ---------- */
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast('Đã sao chép'); }
   catch { toast('Hãy chạm giữ để sao chép'); }
@@ -772,42 +842,12 @@ function showSecret({ title, intro, secret, shareText, doneLabel = 'Tôi đã l�
   acts.push({ label: doneLabel, cls: 'primary', run: () => true });
   return modal({ title, locked: true, body: `<p class="code-help">${intro}</p><div class="code-box">${esc(secret)}</div>`, actions: acts });
 }
-const showRecoveryCode = (code) => showSecret({
-  title: 'Mã khôi phục của bạn',
-  intro: 'Hãy <b>lưu mã này ở nơi an toàn</b> (chụp màn hình, Ghi chú, gửi cho chính mình…). Khi quên mật khẩu, dùng email + mã này để đặt lại. Mã chỉ hiện <b>một lần</b>.',
-  secret: code,
-  shareText: `Mã khôi phục tài khoản Ví (vi.nhv.me) của ${state.user?.email || $('#authEmail').value}: ${code}`,
-});
-async function newRecoveryCode() {
-  const r = await modal({
-    title: state.user?.has_recovery ? 'Tạo mã khôi phục mới' : 'Tạo mã khôi phục',
-    body: `<p class="code-help">${state.user?.has_recovery ? 'Mã cũ sẽ không dùng được nữa. ' : ''}Nhập mật khẩu để xác nhận.</p>` + field('rcPw', 'Mật khẩu hiện tại', '', 'password', 'autocomplete="current-password"'),
-    actions: [{ label: 'Huỷ' }, { label: 'Tạo mã', cls: 'primary', run: () => api('/me/recovery', { method: 'POST', body: { password: $('#rcPw').value } }) }],
-  });
-  if (r?.recovery_code) {
-    state.user.has_recovery = true; LS.set('user', state.user); render();
-    await showRecoveryCode(r.recovery_code);
-  }
-}
-async function forgotPassword() {
-  const r = await modal({
+function forgotPassword() {
+  modal({
     title: 'Quên mật khẩu',
-    body: `<p class="code-help">Nhập email và <b>mã khôi phục</b> bạn đã lưu khi đăng ký. Nếu không còn mã, hãy nhờ quản trị viên đặt lại mật khẩu.</p>`
-      + field('fgEmail', 'Email', $('#authEmail').value, 'email', 'autocomplete="email" inputmode="email"')
-      + field('fgCode', 'Mã khôi phục (XXXX-XXXX-XXXX-XXXX)', '', 'text', 'autocapitalize="characters" autocomplete="off" spellcheck="false"')
-      + field('fgPw', 'Mật khẩu mới (ít nhất 6 ký tự)', '', 'password', 'autocomplete="new-password"'),
-    actions: [{ label: 'Huỷ' }, { label: 'Đặt lại', cls: 'primary', run: () => api('/auth/recover', { method: 'POST', body: { email: $('#fgEmail').value, code: $('#fgCode').value, password: $('#fgPw').value } }) }],
+    body: '<p class="code-help">Hãy liên hệ <b>quản trị viên</b> để được cấp mật khẩu tạm. Khi đăng nhập bằng mật khẩu tạm, bạn sẽ được yêu cầu đặt mật khẩu mới.</p>',
+    actions: [{ label: 'Đã hiểu', cls: 'primary', run: () => true }],
   });
-  if (!r?.ok) return;
-  LS.set('outbox', []); state.outbox = [];
-  toast('Đã đặt lại mật khẩu');
-  await showSecret({
-    title: 'Mã khôi phục mới',
-    intro: 'Mã cũ vừa được dùng nên đã hết hiệu lực. Hãy <b>lưu mã mới</b> này.',
-    secret: r.recovery_code,
-    shareText: `Mã khôi phục tài khoản Ví (vi.nhv.me): ${r.recovery_code}`,
-  });
-  await boot();
 }
 async function forceNewPassword() {
   await modal({
@@ -819,7 +859,6 @@ async function forceNewPassword() {
     } }],
   });
   toast('Đã đổi mật khẩu');
-  if (!state.user.has_recovery) newRecoveryCode();
 }
 
 /* ---------- admin ---------- */
@@ -836,7 +875,7 @@ function renderAdminUsers() {
   $('#adminCount').textContent = adminUsers.length + ' người dùng';
   $('#adminUsers').innerHTML = adminUsers.map((u) => `<button class="admin-user" data-uid="${esc(u.id)}">
       <span class="avatar">${esc(initials(u.name))}</span>
-      <span class="acc-main"><b>${esc(u.name)}${u.is_admin ? '<span class="badge">Admin</span>' : ''}${u.has_recovery ? '' : '<span class="badge warn">chưa có mã</span>'}</b><span class="muted small">${esc(u.email)}</span></span>
+      <span class="acc-main"><b>${esc(u.name)}${u.is_admin ? '<span class="badge">Admin</span>' : ''}</b><span class="muted small">${esc(u.email)}</span></span>
       <span class="chev">›</span></button>`).join('') || '<p class="muted small">Không tìm thấy.</p>';
 }
 const fmtTime = (t) => (t ? new Date(t).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—');
@@ -847,7 +886,7 @@ async function openAdminUser(id) {
     title: u.name,
     body: `<div class="kv"><span>Email</span><b>${esc(u.email)}</b><span>Đăng ký</span><b>${fmtTime(u.created_at)}</b>
       <span>Đăng nhập gần nhất</span><b>${fmtTime(u.last_login)}</b><span>Số sổ</span><b>${u.books}</b>
-      <span>Mã khôi phục</span><b>${u.has_recovery ? 'Đã có' : 'Chưa có'}</b><span>Vai trò</span><b>${u.is_admin ? 'Quản trị viên' : 'Người dùng'}</b></div>`,
+      <span>Vai trò</span><b>${u.is_admin ? 'Quản trị viên' : 'Người dùng'}</b></div>`,
     stack: true,
     actions: [
       { label: '🔑 Đặt lại mật khẩu', run: () => 'reset' },
@@ -917,16 +956,29 @@ function bind() {
     const b = e.target.closest('button'); if (!b) return;
     state.listFilter = b.dataset.f; $$('#listFilter button').forEach((x) => x.classList.toggle('on', x === b)); renderList();
   });
-  $('#activeCat').addEventListener('click', (e) => { if (e.target.closest('button')) { state.listCat = null; renderList(); } });
+  $('#activeCat').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-clear]'); if (!b) return;
+    if (b.dataset.clear === 'cat') state.listCat = null; else state.listPerson = null;
+    renderList();
+  });
 
   // report
   $('#reportMode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; state.repMode = b.dataset.m; state.repAnchor = new Date(); renderReport(); });
   $$('[data-rep-nav]').forEach((b) => b.addEventListener('click', () => { shiftAnchor(+b.dataset.repNav); renderReport(); }));
   $('#donutType').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; state.donutType = b.dataset.t; renderReport(); });
+  $('#personType').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; state.personType = b.dataset.t; renderReport(); });
+  $('#personBreakdown').addEventListener('click', (e) => {
+    const r = e.target.closest('[data-person]'); if (!r) return;
+    const [from] = repRange();
+    state.listPerson = r.dataset.person; state.listCat = null; state.listFilter = state.personType;
+    state.listMonth = monthStart(state.repMode === 'year' ? new Date() : from);
+    $$('#listFilter button').forEach((x) => x.classList.toggle('on', x.dataset.f === state.listFilter));
+    go('list');
+  });
   $('#catBreakdown').addEventListener('click', (e) => {
     const r = e.target.closest('[data-cat]'); if (!r) return;
     const [from] = repRange();
-    state.listCat = r.dataset.cat; state.listFilter = 'all'; state.listMonth = monthStart(state.repMode === 'year' ? new Date() : from);
+    state.listCat = r.dataset.cat; state.listPerson = null; state.listFilter = 'all'; state.listMonth = monthStart(state.repMode === 'year' ? new Date() : from);
     $$('#listFilter button').forEach((x) => x.classList.toggle('on', x.dataset.f === 'all'));
     go('list');
   });
@@ -937,6 +989,12 @@ function bind() {
   $('#catGrid').addEventListener('click', (e) => {
     const b = e.target.closest('.cat-btn'); if (!b) return; haptic();
     form.cat = b.dataset.cat; $$('.cat-btn').forEach((x) => x.classList.toggle('on', x === b));
+  });
+  $('#personChips').addEventListener('click', (e) => {
+    if (e.target.closest('[data-person-add]')) return quickAddPerson();
+    const b = e.target.closest('[data-person]'); if (!b) return; haptic();
+    form.person = form.person === b.dataset.person ? null : b.dataset.person;
+    $$('#personChips [data-person]').forEach((x) => x.classList.toggle('on', x.dataset.person === form.person));
   });
   $('#dateChips').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { form.date = ymd(addDays(new Date(), +b.dataset.d)); renderDate(); } });
   $('#dateInput').addEventListener('change', (e) => { if (e.target.value) { form.date = e.target.value; renderDate(); } });
@@ -967,6 +1025,8 @@ function bind() {
   $('#catType').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.catType = b.dataset.t; renderSettings(); } });
   $('#catManage').addEventListener('click', (e) => { const b = e.target.closest('[data-cat]'); if (b) openCatDialog(state.cats.find((c) => c.id === b.dataset.cat)); });
   $('#addCatBtn').addEventListener('click', () => openCatDialog());
+  $('#addPersonBtn').addEventListener('click', () => personDialog());
+  $('#peopleManage').addEventListener('click', (e) => { const b = e.target.closest('[data-pid]'); if (b) personDialog(state.people.find((p) => p.id === b.dataset.pid)); });
   $('#swatches').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; editingCat.color = b.dataset.c; $$('#swatches button').forEach((x) => x.classList.toggle('on', x === b)); });
   $('#catCancel').addEventListener('click', closeCatDialog);
   $('#dlgBackdrop').addEventListener('click', closeCatDialog);
@@ -977,8 +1037,6 @@ function bind() {
   $('#importJson').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importJson(f); e.target.value = ''; });
   $('#logoutBtn').addEventListener('click', logout);
   $('#forgotBtn').addEventListener('click', forgotPassword);
-  $('#recoveryBtn').addEventListener('click', newRecoveryCode);
-  $('#recoveryNoticeBtn').addEventListener('click', newRecoveryCode);
   $('#adminSearch').addEventListener('input', () => { clearTimeout(adminT); adminT = setTimeout(loadAdminUsers, 250); });
   $('#adminUsers').addEventListener('click', (e) => { const b = e.target.closest('[data-uid]'); if (b) openAdminUser(b.dataset.uid); });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-book-switch]')) { haptic(); openBookSwitcher(); } });
@@ -1052,10 +1110,9 @@ function bind() {
     const btn = $('#authSubmit'); btn.disabled = true;
     try {
       const body = { email: $('#authEmail').value, password: $('#pw').value, name: $('#authName').value };
-      const r = await api(authMode === 'register' ? '/auth/register' : '/auth/login', { method: 'POST', body });
+      await api(authMode === 'register' ? '/auth/register' : '/auth/login', { method: 'POST', body });
       $('#pw').value = '';
       LS.set('outbox', []); state.outbox = [];
-      if (r.recovery_code) await showRecoveryCode(r.recovery_code);
       await boot();
     } catch (err) {
       $('#loginErr').textContent = err.status ? err.message : 'Không kết nối được máy chủ';

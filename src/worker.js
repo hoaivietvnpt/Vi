@@ -27,6 +27,11 @@ const DEFAULT_CATS = [
   ['Khác', '💰', '#65A30D', 'income'],
 ];
 
+const DEFAULT_PEOPLE = [
+  ['Bố', '👨'], ['Mẹ', '👩'], ['Vợ/Chồng', '💞'], ['Con', '👶'], ['Anh', '🧔'],
+  ['Chị', '👩‍🦰'], ['Em', '🧒'], ['Ông bà', '👴'], ['Bạn bè', '🤝'],
+];
+
 /* ---------------- helpers ---------------- */
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify(data), {
@@ -67,12 +72,6 @@ const inviteCode = () => {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => a[b % a.length]).join('');
 };
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-// 16 chars ≈ 80 bits, shown as XXXX-XXXX-XXXX-XXXX
-const recoveryCode = () =>
-  [...crypto.getRandomValues(new Uint8Array(16))].map((b) => CODE_ALPHABET[b % 32]).join('').match(/.{4}/g).join('-');
-const normCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-const hashRecovery = (code) => sha256('recovery:' + normCode(code));
 const tempPassword = () => {
   const a = 'abcdefghijkmnpqrstuvwxyz23456789';
   return [...crypto.getRandomValues(new Uint8Array(10))].map((b) => a[b % a.length]).join('');
@@ -87,6 +86,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TYPES = new Set(['expense', 'income']);
 const cleanName = (s, max = 40) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, max);
 
+const personOf = (b) => (typeof b.person_id === 'string' && /^[\w-]{1,64}$/.test(b.person_id) ? b.person_id : null);
 function validateTx(b) {
   const amount = Math.round(Number(b.amount));
   if (!TYPES.has(b.type)) return 'Loại giao dịch không hợp lệ';
@@ -108,7 +108,7 @@ async function currentUser(req, env) {
   if (!m) return null;
   const sid = await sha256(m[1]);
   const row = await env.DB.prepare(
-    'SELECT u.id, u.email, u.name, u.is_admin, u.must_change_pw, (u.recovery_hash IS NOT NULL) AS has_recovery, s.id AS sid FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?'
+    'SELECT u.id, u.email, u.name, u.is_admin, u.must_change_pw, s.id AS sid FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?'
   ).bind(sid, now()).first();
   return row || null;
 }
@@ -140,6 +140,8 @@ async function createBook(env, userId, name, icon, { seed = true } = {}) {
     env.DB.prepare('INSERT INTO book_members (book_id,user_id,role,joined_at) VALUES (?,?,?,?)').bind(id, userId, 'owner', now()),
   ];
   if (seed) stmts.push(...seedCategories(env, id));
+  stmts.push(...DEFAULT_PEOPLE.map(([name, icon], i) =>
+    env.DB.prepare('INSERT INTO people (id,book_id,name,icon,sort) VALUES (?,?,?,?,?)').bind(uuid(), id, name, icon, i + 1)));
   await env.DB.batch(stmts);
   return id;
 }
@@ -172,10 +174,9 @@ async function authRoutes(req, env, path) {
     await recordFailure(env, 'reg:' + ip, 60 * 60e3); // counts registrations per IP
 
     const userId = uuid();
-    const code = recoveryCode();
     const { n: before } = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
-    await env.DB.prepare('INSERT INTO users (id,email,name,pw_hash,created_at,recovery_hash,is_admin) VALUES (?,?,?,?,?,?,?)')
-      .bind(userId, email, name, await hashPassword(pw), now(), await hashRecovery(code), before === 0 ? 1 : 0).run();
+    await env.DB.prepare('INSERT INTO users (id,email,name,pw_hash,created_at,is_admin) VALUES (?,?,?,?,?,?)')
+      .bind(userId, email, name, await hashPassword(pw), now(), before === 0 ? 1 : 0).run();
 
     // First account adopts any data created before multi-user existed.
     const n = before + 1;
@@ -187,7 +188,7 @@ async function authRoutes(req, env, path) {
         env.DB.prepare('UPDATE transactions SET book_id=?, created_by=? WHERE book_id IS NULL').bind(bookId, userId),
       ]);
     }
-    return json({ ok: true, recovery_code: code }, 201, { 'set-cookie': await createSession(env, userId) });
+    return json({ ok: true }, 201, { 'set-cookie': await createSession(env, userId) });
   }
 
   if (path === '/auth/login' && req.method === 'POST') {
@@ -206,27 +207,6 @@ async function authRoutes(req, env, path) {
     return json({ ok: true }, 200, { 'set-cookie': await createSession(env, user.id) });
   }
 
-  if (path === '/auth/recover' && req.method === 'POST') {
-    const b = await readJson(req);
-    const email = String(b.email || '').trim().toLowerCase();
-    const key = 'recover:' + ip;
-    if (await rateLimited(env, key, 6, 60 * 60e3)) return bad('Thử sai quá nhiều lần, hãy thử lại sau 1 giờ', 429);
-    const pw = String(b.password || '');
-    if (pw.length < 6 || pw.length > 200) return bad('Mật khẩu mới cần ít nhất 6 ký tự');
-    const user = await env.DB.prepare('SELECT id, recovery_hash FROM users WHERE email=?').bind(email).first();
-    const ok = user?.recovery_hash && safeEqual(await hashRecovery(b.code), user.recovery_hash);
-    if (!ok) {
-      await recordFailure(env, key, 60 * 60e3);
-      return bad('Email hoặc mã khôi phục không đúng', 401);
-    }
-    const code = recoveryCode(); // the used code is replaced
-    await env.DB.batch([
-      env.DB.prepare('UPDATE users SET pw_hash=?, recovery_hash=?, must_change_pw=0 WHERE id=?').bind(await hashPassword(pw), await hashRecovery(code), user.id),
-      env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(user.id),
-    ]);
-    return json({ ok: true, recovery_code: code }, 200, { 'set-cookie': await createSession(env, user.id) });
-  }
-
   if (path === '/auth/logout' && req.method === 'POST') {
     const u = await currentUser(req, env);
     if (u) await env.DB.prepare('DELETE FROM sessions WHERE id=?').bind(u.sid).run();
@@ -241,7 +221,7 @@ async function accountRoutes(req, env, path, user) {
 
   if (path === '/me' && method === 'GET') {
     return json({
-      user: { id: user.id, email: user.email, name: user.name, is_admin: !!user.is_admin, must_change_pw: !!user.must_change_pw, has_recovery: !!user.has_recovery },
+      user: { id: user.id, email: user.email, name: user.name, is_admin: !!user.is_admin, must_change_pw: !!user.must_change_pw },
       books: await listBooks(env, user.id),
     });
   }
@@ -264,22 +244,13 @@ async function accountRoutes(req, env, path, user) {
     return json({ ok: true });
   }
 
-  if (path === '/me/recovery' && method === 'POST') {
-    const b = await readJson(req);
-    const row = await env.DB.prepare('SELECT pw_hash FROM users WHERE id=?').bind(user.id).first();
-    if (!(await verifyPassword(String(b.password || ''), row.pw_hash))) return bad('Mật khẩu không đúng', 403);
-    const code = recoveryCode();
-    await env.DB.prepare('UPDATE users SET recovery_hash=? WHERE id=?').bind(await hashRecovery(code), user.id).run();
-    return json({ recovery_code: code });
-  }
-
   // ---- admin ----
   if (path.startsWith('/admin/')) {
     if (!user.is_admin) return bad('Chỉ quản trị viên', 403);
     if (path === '/admin/users' && method === 'GET') {
       const q = '%' + (new URL(req.url).searchParams.get('q') || '').trim().toLowerCase() + '%';
       const { results } = await env.DB.prepare(
-        `SELECT u.id, u.email, u.name, u.created_at, u.is_admin, (u.recovery_hash IS NOT NULL) AS has_recovery,
+        `SELECT u.id, u.email, u.name, u.created_at, u.is_admin,
            (SELECT COUNT(*) FROM book_members m WHERE m.user_id = u.id) AS books,
            (SELECT MAX(created_at) FROM sessions s WHERE s.user_id = u.id) AS last_login
          FROM users u WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? ORDER BY u.created_at DESC LIMIT 200`
@@ -353,6 +324,7 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     await DB.batch([
       DB.prepare('DELETE FROM transactions WHERE book_id=?').bind(bookId),
       DB.prepare('DELETE FROM categories WHERE book_id=?').bind(bookId),
+      DB.prepare('DELETE FROM people WHERE book_id=?').bind(bookId),
       DB.prepare('DELETE FROM book_members WHERE book_id=?').bind(bookId),
       DB.prepare('DELETE FROM books WHERE id=?').bind(bookId),
     ]);
@@ -379,6 +351,36 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     if (target === user.id && n <= 1) return bad('Bạn cần giữ lại ít nhất một sổ');
     await DB.prepare("DELETE FROM book_members WHERE book_id=? AND user_id=? AND role<>'owner'").bind(bookId, target).run();
     return json({ ok: true });
+  }
+
+  // --- people (Chi cho / Thu từ) ---
+  if (sub === '/people' && method === 'GET') {
+    const { results } = await DB.prepare('SELECT * FROM people WHERE book_id=? ORDER BY sort, name').bind(bookId).all();
+    return json(results);
+  }
+  if (sub === '/people' && method === 'POST') {
+    const b = await readJson(req);
+    const name = cleanName(b.name, 30);
+    if (!name) return bad('Tên không hợp lệ');
+    const id = uuid();
+    const { max } = await DB.prepare('SELECT COALESCE(MAX(sort),0) AS max FROM people WHERE book_id=?').bind(bookId).first();
+    await DB.prepare('INSERT INTO people (id,book_id,name,icon,sort) VALUES (?,?,?,?,?)')
+      .bind(id, bookId, name, String(b.icon || '🙂').slice(0, 8), max + 1).run();
+    return json(await DB.prepare('SELECT * FROM people WHERE id=?').bind(id).first(), 201);
+  }
+  m = sub.match(/^\/people\/([\w-]+)$/);
+  if (m && method === 'PUT') {
+    const b = await readJson(req);
+    await DB.prepare('UPDATE people SET name=COALESCE(?,name), icon=COALESCE(?,icon), archived=COALESCE(?,archived) WHERE id=? AND book_id=?')
+      .bind(cleanName(b.name, 30) || null, b.icon ? String(b.icon).slice(0, 8) : null, b.archived == null ? null : b.archived ? 1 : 0, m[1], bookId).run();
+    const row = await DB.prepare('SELECT * FROM people WHERE id=? AND book_id=?').bind(m[1], bookId).first();
+    return row ? json(row) : bad('Không tìm thấy', 404);
+  }
+  if (m && method === 'DELETE') {
+    const used = await DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE person_id=? AND book_id=?').bind(m[1], bookId).first();
+    if (used.n > 0) await DB.prepare('UPDATE people SET archived=1 WHERE id=? AND book_id=?').bind(m[1], bookId).run();
+    else await DB.prepare('DELETE FROM people WHERE id=? AND book_id=?').bind(m[1], bookId).run();
+    return json({ ok: true, archived: used.n > 0 });
   }
 
   // --- categories ---
@@ -418,7 +420,7 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     const to = url.searchParams.get('to') || '9999-12-31';
     if (!DATE_RE.test(from) || !DATE_RE.test(to)) return bad('Khoảng ngày không hợp lệ');
     const { results } = await DB.prepare(
-      'SELECT id,type,amount,category_id,note,date,created_at,updated_at,created_by FROM transactions WHERE book_id=? AND date BETWEEN ? AND ? ORDER BY date DESC, created_at DESC LIMIT 50000'
+      'SELECT id,type,amount,category_id,person_id,note,date,created_at,updated_at,created_by FROM transactions WHERE book_id=? AND date BETWEEN ? AND ? ORDER BY date DESC, created_at DESC LIMIT 50000'
     ).bind(bookId, from, to).all();
     return json(results);
   }
@@ -429,8 +431,8 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     const id = typeof b.id === 'string' && /^[\w-]{8,64}$/.test(b.id) ? b.id : uuid();
     const t = now();
     await DB.prepare(
-      'INSERT INTO transactions (id,type,amount,category_id,note,date,created_at,updated_at,book_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING'
-    ).bind(id, b.type, Math.round(b.amount), b.category_id, String(b.note || '').slice(0, 200), b.date, t, t, bookId, user.id).run();
+      'INSERT INTO transactions (id,type,amount,category_id,person_id,note,date,created_at,updated_at,book_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING'
+    ).bind(id, b.type, Math.round(b.amount), b.category_id, personOf(b), String(b.note || '').slice(0, 200), b.date, t, t, bookId, user.id).run();
     const row = await DB.prepare('SELECT * FROM transactions WHERE id=? AND book_id=?').bind(id, bookId).first();
     return row ? json(row, 201) : bad('Trùng mã giao dịch', 409);
   }
@@ -439,8 +441,8 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     const b = await readJson(req);
     const err = validateTx(b);
     if (err) return bad(err);
-    await DB.prepare('UPDATE transactions SET type=?, amount=?, category_id=?, note=?, date=?, updated_at=? WHERE id=? AND book_id=?')
-      .bind(b.type, Math.round(b.amount), b.category_id, String(b.note || '').slice(0, 200), b.date, now(), m[1], bookId).run();
+    await DB.prepare('UPDATE transactions SET type=?, amount=?, category_id=?, person_id=?, note=?, date=?, updated_at=? WHERE id=? AND book_id=?')
+      .bind(b.type, Math.round(b.amount), b.category_id, personOf(b), String(b.note || '').slice(0, 200), b.date, now(), m[1], bookId).run();
     const row = await DB.prepare('SELECT * FROM transactions WHERE id=? AND book_id=?').bind(m[1], bookId).first();
     return row ? json(row) : bad('Không tìm thấy', 404);
   }
@@ -458,6 +460,25 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     const mineIds = new Set(mine.map((c) => c.id));
     const byKey = new Map(mine.map((c) => [c.type + '|' + c.name.toLowerCase(), c.id]));
     const catMap = new Map();
+    const srcPeople = new Map((Array.isArray(b.people) ? b.people : []).map((p) => [p.id, p]));
+    const { results: myPeople } = await DB.prepare('SELECT id,name FROM people WHERE book_id=?').bind(bookId).all();
+    const myPeopleIds = new Set(myPeople.map((p) => p.id));
+    const peopleByName = new Map(myPeople.map((p) => [p.name.toLowerCase(), p.id]));
+    const resolvePerson = (srcId) => {
+      if (!srcId) return null;
+      if (myPeopleIds.has(srcId)) return srcId;
+      const src = srcPeople.get(srcId);
+      const name = cleanName(src?.name, 30);
+      if (!name) return null;
+      let id = peopleByName.get(name.toLowerCase());
+      if (!id) {
+        id = uuid();
+        peopleByName.set(name.toLowerCase(), id); myPeopleIds.add(id);
+        stmts.push(DB.prepare('INSERT INTO people (id,book_id,name,icon,sort) VALUES (?,?,?,?,?)').bind(id, bookId, name, String(src.icon || '🙂').slice(0, 8), 99));
+      }
+      srcPeople.set(srcId, { ...src, mapped: id });
+      return id;
+    };
     const stmts = [];
     const resolveCat = (srcId, type) => {
       if (mineIds.has(srcId)) return srcId;
@@ -482,8 +503,8 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
       const cat = resolveCat(r.category_id, r.type);
       const id = typeof r.id === 'string' && /^[\w-]{8,64}$/.test(r.id) ? r.id : uuid();
       stmts.push(DB.prepare(
-        'INSERT OR IGNORE INTO transactions (id,type,amount,category_id,note,date,created_at,updated_at,book_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)'
-      ).bind(id, r.type, Math.round(r.amount), cat, String(r.note || '').slice(0, 200), r.date, Number(r.created_at) || t, t, bookId, user.id));
+        'INSERT OR IGNORE INTO transactions (id,type,amount,category_id,person_id,note,date,created_at,updated_at,book_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+      ).bind(id, r.type, Math.round(r.amount), cat, resolvePerson(r.person_id), String(r.note || '').slice(0, 200), r.date, Number(r.created_at) || t, t, bookId, user.id));
       count++;
     }
     for (let i = 0; i < stmts.length; i += 100) await DB.batch(stmts.slice(i, i + 100));
