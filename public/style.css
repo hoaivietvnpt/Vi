@@ -324,3 +324,27 @@ h1, h2, h3, p { margin: 0; }
 .dlg-actions .btn { flex: 1; }
 .dlg-actions.stack { flex-direction: column; align-items: stretch; }
 .tx-who { color: var(--text-2); font-weight: 550; }
+
+/* ---------- recovery & admin ---------- */
+#forgotBtn { margin-top: 14px; color: var(--muted); }
+.notice { display: flex; align-items: center; gap: 12px; border: 1.5px dashed var(--line); box-shadow: none; }
+.notice-ic { font-size: 26px; }
+.notice-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.notice-main b { font-size: 15px; }
+.notice .btn.sm { background: var(--primary); color: var(--on-primary); }
+.row-note { margin-left: auto; font-style: normal; font-size: 13px; color: var(--muted); font-weight: 500; }
+.row-note.warn { color: var(--exp-text); }
+.code-box { background: var(--surface-2); border-radius: 14px; padding: 16px 10px; text-align: center; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 21px; font-weight: 750; letter-spacing: .06em; user-select: all; -webkit-user-select: all; margin: 4px 0 10px; word-break: break-all; }
+.code-help { font-size: 14px; color: var(--text-2); line-height: 1.5; margin-bottom: 10px; }
+.code-help b { color: var(--text); }
+.admin-user { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 9px 0; border-top: 1px solid var(--line); }
+.admin-user:first-child { border-top: 0; }
+.admin-user .avatar { width: 36px; height: 36px; font-size: 15px; }
+.admin-user .acc-main { flex: 1; }
+.admin-user .acc-main b { font-size: 15px; font-weight: 600; }
+.badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); margin-left: 6px; vertical-align: 1px; }
+.badge.warn { color: var(--exp-text); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; margin-bottom: 12px; }
+.kv span { color: var(--muted); }
+.kv b { font-weight: 600; text-align: right; word-break: break-all; }
+.dlg-actions.stack .btn { flex: none; height: 46px; }

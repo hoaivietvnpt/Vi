@@ -67,6 +67,16 @@ const inviteCode = () => {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => a[b % a.length]).join('');
 };
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// 16 chars ≈ 80 bits, shown as XXXX-XXXX-XXXX-XXXX
+const recoveryCode = () =>
+  [...crypto.getRandomValues(new Uint8Array(16))].map((b) => CODE_ALPHABET[b % 32]).join('').match(/.{4}/g).join('-');
+const normCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const hashRecovery = (code) => sha256('recovery:' + normCode(code));
+const tempPassword = () => {
+  const a = 'abcdefghijkmnpqrstuvwxyz23456789';
+  return [...crypto.getRandomValues(new Uint8Array(10))].map((b) => a[b % a.length]).join('');
+};
 const cookie = (val, maxAge) => `${COOKIE}=${val}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 async function readJson(req) {
   try { return await req.json(); } catch { return {}; }
@@ -98,7 +108,7 @@ async function currentUser(req, env) {
   if (!m) return null;
   const sid = await sha256(m[1]);
   const row = await env.DB.prepare(
-    'SELECT u.id, u.email, u.name, s.id AS sid FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?'
+    'SELECT u.id, u.email, u.name, u.is_admin, u.must_change_pw, (u.recovery_hash IS NOT NULL) AS has_recovery, s.id AS sid FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?'
   ).bind(sid, now()).first();
   return row || null;
 }
@@ -162,11 +172,13 @@ async function authRoutes(req, env, path) {
     await recordFailure(env, 'reg:' + ip, 60 * 60e3); // counts registrations per IP
 
     const userId = uuid();
-    await env.DB.prepare('INSERT INTO users (id,email,name,pw_hash,created_at) VALUES (?,?,?,?,?)')
-      .bind(userId, email, name, await hashPassword(pw), now()).run();
+    const code = recoveryCode();
+    const { n: before } = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
+    await env.DB.prepare('INSERT INTO users (id,email,name,pw_hash,created_at,recovery_hash,is_admin) VALUES (?,?,?,?,?,?,?)')
+      .bind(userId, email, name, await hashPassword(pw), now(), await hashRecovery(code), before === 0 ? 1 : 0).run();
 
     // First account adopts any data created before multi-user existed.
-    const { n } = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
+    const n = before + 1;
     const legacy = n === 1 && (await env.DB.prepare('SELECT 1 FROM categories WHERE book_id IS NULL LIMIT 1').first());
     const bookId = await createBook(env, userId, 'Sổ cá nhân', '📒', { seed: !legacy });
     if (legacy) {
@@ -175,7 +187,7 @@ async function authRoutes(req, env, path) {
         env.DB.prepare('UPDATE transactions SET book_id=?, created_by=? WHERE book_id IS NULL').bind(bookId, userId),
       ]);
     }
-    return json({ ok: true }, 201, { 'set-cookie': await createSession(env, userId) });
+    return json({ ok: true, recovery_code: code }, 201, { 'set-cookie': await createSession(env, userId) });
   }
 
   if (path === '/auth/login' && req.method === 'POST') {
@@ -194,6 +206,27 @@ async function authRoutes(req, env, path) {
     return json({ ok: true }, 200, { 'set-cookie': await createSession(env, user.id) });
   }
 
+  if (path === '/auth/recover' && req.method === 'POST') {
+    const b = await readJson(req);
+    const email = String(b.email || '').trim().toLowerCase();
+    const key = 'recover:' + ip;
+    if (await rateLimited(env, key, 6, 60 * 60e3)) return bad('Thử sai quá nhiều lần, hãy thử lại sau 1 giờ', 429);
+    const pw = String(b.password || '');
+    if (pw.length < 6 || pw.length > 200) return bad('Mật khẩu mới cần ít nhất 6 ký tự');
+    const user = await env.DB.prepare('SELECT id, recovery_hash FROM users WHERE email=?').bind(email).first();
+    const ok = user?.recovery_hash && safeEqual(await hashRecovery(b.code), user.recovery_hash);
+    if (!ok) {
+      await recordFailure(env, key, 60 * 60e3);
+      return bad('Email hoặc mã khôi phục không đúng', 401);
+    }
+    const code = recoveryCode(); // the used code is replaced
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET pw_hash=?, recovery_hash=?, must_change_pw=0 WHERE id=?').bind(await hashPassword(pw), await hashRecovery(code), user.id),
+      env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(user.id),
+    ]);
+    return json({ ok: true, recovery_code: code }, 200, { 'set-cookie': await createSession(env, user.id) });
+  }
+
   if (path === '/auth/logout' && req.method === 'POST') {
     const u = await currentUser(req, env);
     if (u) await env.DB.prepare('DELETE FROM sessions WHERE id=?').bind(u.sid).run();
@@ -207,7 +240,10 @@ async function accountRoutes(req, env, path, user) {
   const method = req.method;
 
   if (path === '/me' && method === 'GET') {
-    return json({ user: { id: user.id, email: user.email, name: user.name }, books: await listBooks(env, user.id) });
+    return json({
+      user: { id: user.id, email: user.email, name: user.name, is_admin: !!user.is_admin, must_change_pw: !!user.must_change_pw, has_recovery: !!user.has_recovery },
+      books: await listBooks(env, user.id),
+    });
   }
   if (path === '/me' && method === 'PUT') {
     const name = cleanName((await readJson(req)).name);
@@ -218,14 +254,57 @@ async function accountRoutes(req, env, path, user) {
   if (path === '/me/password' && method === 'POST') {
     const b = await readJson(req);
     const row = await env.DB.prepare('SELECT pw_hash FROM users WHERE id=?').bind(user.id).first();
-    if (!(await verifyPassword(String(b.current || ''), row.pw_hash))) return bad('Mật khẩu hiện tại không đúng', 403);
+    if (!user.must_change_pw && !(await verifyPassword(String(b.current || ''), row.pw_hash))) return bad('Mật khẩu hiện tại không đúng', 403);
     const next = String(b.next || '');
     if (next.length < 6 || next.length > 200) return bad('Mật khẩu mới cần ít nhất 6 ký tự');
     await env.DB.batch([
-      env.DB.prepare('UPDATE users SET pw_hash=? WHERE id=?').bind(await hashPassword(next), user.id),
+      env.DB.prepare('UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?').bind(await hashPassword(next), user.id),
       env.DB.prepare('DELETE FROM sessions WHERE user_id=? AND id<>?').bind(user.id, user.sid),
     ]);
     return json({ ok: true });
+  }
+
+  if (path === '/me/recovery' && method === 'POST') {
+    const b = await readJson(req);
+    const row = await env.DB.prepare('SELECT pw_hash FROM users WHERE id=?').bind(user.id).first();
+    if (!(await verifyPassword(String(b.password || ''), row.pw_hash))) return bad('Mật khẩu không đúng', 403);
+    const code = recoveryCode();
+    await env.DB.prepare('UPDATE users SET recovery_hash=? WHERE id=?').bind(await hashRecovery(code), user.id).run();
+    return json({ recovery_code: code });
+  }
+
+  // ---- admin ----
+  if (path.startsWith('/admin/')) {
+    if (!user.is_admin) return bad('Chỉ quản trị viên', 403);
+    if (path === '/admin/users' && method === 'GET') {
+      const q = '%' + (new URL(req.url).searchParams.get('q') || '').trim().toLowerCase() + '%';
+      const { results } = await env.DB.prepare(
+        `SELECT u.id, u.email, u.name, u.created_at, u.is_admin, (u.recovery_hash IS NOT NULL) AS has_recovery,
+           (SELECT COUNT(*) FROM book_members m WHERE m.user_id = u.id) AS books,
+           (SELECT MAX(created_at) FROM sessions s WHERE s.user_id = u.id) AS last_login
+         FROM users u WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? ORDER BY u.created_at DESC LIMIT 200`
+      ).bind(q, q).all();
+      return json(results);
+    }
+    let am = path.match(/^\/admin\/users\/([\w-]+)\/reset$/);
+    if (am && method === 'POST') {
+      const target = await env.DB.prepare('SELECT id FROM users WHERE id=?').bind(am[1]).first();
+      if (!target) return bad('Không tìm thấy', 404);
+      const temp = tempPassword();
+      await env.DB.batch([
+        env.DB.prepare('UPDATE users SET pw_hash=?, must_change_pw=1 WHERE id=?').bind(await hashPassword(temp), target.id),
+        env.DB.prepare('DELETE FROM sessions WHERE user_id=? AND id<>?').bind(target.id, user.sid),
+      ]);
+      return json({ temp_password: temp });
+    }
+    am = path.match(/^\/admin\/users\/([\w-]+)\/admin$/);
+    if (am && method === 'POST') {
+      const make = !!(await readJson(req)).is_admin;
+      if (!make && am[1] === user.id) return bad('Không thể tự bỏ quyền quản trị của mình');
+      await env.DB.prepare('UPDATE users SET is_admin=? WHERE id=?').bind(make ? 1 : 0, am[1]).run();
+      return json({ ok: true });
+    }
+    return bad('Not found', 404);
   }
 
   if (path === '/books' && method === 'POST') {

@@ -15,7 +15,7 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=3" />
+  <link rel="stylesheet" href="/style.css?v=4" />
 </head>
 <body>
   <div id="app">
@@ -36,6 +36,7 @@
           <button class="btn primary block" type="submit" id="authSubmit">Đăng nhập</button>
           <p id="loginErr" class="err" role="alert"></p>
         </form>
+        <button class="link small" id="forgotBtn" type="button">Quên mật khẩu?</button>
         <p class="muted small" id="joinHint" hidden>Đăng nhập hoặc đăng ký để tham gia sổ chung.</p>
       </div>
     </section>
@@ -51,6 +52,12 @@
           <span id="syncBadge" class="sync" hidden title="Đang chờ đồng bộ"></span>
           <button class="book-pill" data-book-switch><span class="bp-ic"></span><span class="bp-name"></span><span class="chev">▾</span></button>
         </header>
+
+        <div class="card notice" id="recoveryNotice" hidden>
+          <span class="notice-ic">🛟</span>
+          <div class="notice-main"><b>Tạo mã khôi phục</b><span class="muted small">Dùng để tự lấy lại tài khoản khi quên mật khẩu.</span></div>
+          <button class="btn primary sm" id="recoveryNoticeBtn">Tạo</button>
+        </div>
 
         <div class="card balance">
           <div class="balance-head">
@@ -187,6 +194,7 @@
           <div class="rows">
             <button class="row-btn" id="editNameBtn"><span>✏️</span>Đổi tên hiển thị</button>
             <button class="row-btn" id="changePwBtn"><span>🔑</span>Đổi mật khẩu</button>
+            <button class="row-btn" id="recoveryBtn"><span>🛟</span>Mã khôi phục<em class="row-note" id="recoveryState"></em></button>
             <button class="row-btn danger" id="logoutBtn"><span>🚪</span>Đăng xuất</button>
           </div>
         </div>
@@ -237,6 +245,12 @@
           </div>
         </div>
 
+        <div class="card" id="adminCard" hidden>
+          <div class="card-head"><h2>Quản trị người dùng</h2><span class="muted small" id="adminCount"></span></div>
+          <input class="modal-field" id="adminSearch" type="search" placeholder="Tìm theo tên hoặc email…" />
+          <div id="adminUsers"></div>
+        </div>
+
         <div class="card">
           <div class="card-head"><h2>Thêm vào màn hình chính</h2></div>
           <ol class="howto">
@@ -246,7 +260,7 @@
           </ol>
         </div>
 
-        <p class="muted center small">Ví · v2.0</p>
+        <p class="muted center small">Ví · v2.1</p>
       </section>
     </main>
 
@@ -327,6 +341,6 @@
     <div class="toast" id="toast" role="status"></div>
     <div class="tooltip" id="tip" hidden></div>
   </div>
-  <script src="/app.js?v=3" defer></script>
+  <script src="/app.js?v=4" defer></script>
 </body>
 </html>

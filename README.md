@@ -21,6 +21,13 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
 - **Bảo mật**: mật khẩu băm PBKDF2-SHA256, phiên đăng nhập lưu trong D1 (cookie HttpOnly, 1 năm; đổi mật khẩu sẽ
   đăng xuất các thiết bị khác), giới hạn số lần đăng nhập sai, kiểm tra quyền theo sổ ở mọi API, chặn CSRF theo Origin.
   Tài khoản đăng ký **đầu tiên** sẽ nhận toàn bộ dữ liệu có từ trước khi bật chế độ nhiều người dùng.
+- **Quên mật khẩu**:
+  - *Mã khôi phục*: mỗi tài khoản có một mã dạng `XXXX-XXXX-XXXX-XXXX` (hiện khi đăng ký, hoặc tạo trong
+    Cài đặt → Mã khôi phục). Ở màn hình đăng nhập bấm **Quên mật khẩu?**, nhập email + mã để đặt mật khẩu mới.
+    Mã đã dùng sẽ được thay bằng mã mới. Giới hạn 6 lần thử sai mỗi giờ.
+  - *Quản trị viên*: tài khoản đầu tiên là admin (có thể cấp quyền cho người khác). Trong Cài đặt → Quản trị người
+    dùng, admin tìm người dùng và **đặt lại mật khẩu** → app tạo mật khẩu tạm; người dùng đăng nhập bằng mật khẩu
+    tạm sẽ bị yêu cầu đặt mật khẩu mới ngay.
 
 ## Thêm vào màn hình chính iPhone
 
@@ -34,7 +41,7 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
 src/worker.js        API (/api/auth, /api/me, /api/books/:id/...) + phục vụ file tĩnh
 src/static.js        Nhúng các file trong public/ vào Worker
 public/              index.html, style.css, app.js, sw.js, manifest, icons
-migrations/          Schema D1 (0001 dữ liệu, 0002 tài khoản/sổ/thành viên)
+migrations/          Schema D1 (0001 dữ liệu, 0002 tài khoản/sổ/thành viên, 0003 khôi phục/admin)
 wrangler.jsonc       Cấu hình Worker, D1 (vi-db), custom domain vi.nhv.me
 ```
 

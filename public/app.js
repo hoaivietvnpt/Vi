@@ -84,8 +84,8 @@ async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
     credentials: 'same-origin',
   });
-  if (res.status === 401) { const e = new Error('auth'); e.auth = true; throw e; }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { const e = new Error(data.error || 'Hết phiên đăng nhập'); e.auth = true; e.status = 401; throw e; }
   if (!res.ok) { const e = new Error(data.error || 'Lỗi'); e.status = res.status; throw e; }
   return data;
 }
@@ -190,6 +190,7 @@ const emptyBox = (msg) => `<div class="empty"><span class="big">🌱</span>${msg
 /* ---------- HOME ---------- */
 function renderHome() {
   const now = new Date();
+  $('#recoveryNotice').hidden = !state.user || !!state.user.has_recovery;
   $('#homeDate').textContent = now.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long' });
   const ms = monthStart(now), me = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   const list = inRange(ms, me);
@@ -585,6 +586,11 @@ function renderSettings() {
   $('#accAvatar').textContent = initials(u.name);
   $('#accName').textContent = u.name || '';
   $('#accEmail').textContent = u.email || '';
+  $('#recoveryState').textContent = u.has_recovery ? 'Đã tạo' : 'Chưa tạo';
+  $('#recoveryState').classList.toggle('warn', !u.has_recovery);
+  const wasHidden = $('#adminCard').hidden;
+  $('#adminCard').hidden = !u.is_admin;
+  if (u.is_admin && wasHidden) loadAdminUsers();
   const b = curBook() || {};
   const owner = b.role === 'owner';
   $('#bookIcon').textContent = b.icon || '📒';
@@ -667,7 +673,7 @@ function toast(msg) {
 }
 
 /* ---------- modal ---------- */
-function modal({ title, body = '', actions = [], stack = false, onOpen }) {
+function modal({ title, body = '', actions = [], stack = false, onOpen, locked = false }) {
   return new Promise((resolve) => {
     $('#modalTitle').textContent = title;
     $('#modalBody').innerHTML = body;
@@ -682,11 +688,11 @@ function modal({ title, body = '', actions = [], stack = false, onOpen }) {
       if (!a.run) return close(null);
       b.disabled = true;
       try { const v = await a.run(); if (v !== false) close(v ?? true); }
-      catch (err) { $('#modalErr').textContent = err.auth ? 'Hết phiên đăng nhập' : err.message || 'Lỗi, thử lại'; }
+      catch (err) { $('#modalErr').textContent = err.status ? err.message : 'Không kết nối được máy chủ'; }
       finally { b.disabled = false; }
     };
     $('#modalBody').onclick = (e) => { const b = e.target.closest('[data-pick]'); if (b) close(b.dataset.pick); };
-    $('#modalBackdrop').onclick = () => close(null);
+    $('#modalBackdrop').onclick = () => { if (!locked) close(null); };
     $('#modal').hidden = false; $('#modalBackdrop').hidden = false; $('#modalBackdrop').classList.add('show');
     onOpen?.();
     const f = $('#modalBody input'); if (f) setTimeout(() => f.focus(), 50);
@@ -753,6 +759,119 @@ async function shareInvite() {
     if (navigator.share) await navigator.share({ title: 'Ví – mời tham gia sổ', text, url });
     else { await navigator.clipboard.writeText(text); toast('Đã sao chép link mời'); }
   } catch {}
+}
+
+/* ---------- recovery code ---------- */
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); toast('Đã sao chép'); }
+  catch { toast('Hãy chạm giữ để sao chép'); }
+}
+function showSecret({ title, intro, secret, shareText, doneLabel = 'Tôi đã lưu' }) {
+  const acts = [{ label: 'Sao chép', run: async () => { await copyText(secret); return false; } }];
+  if (navigator.share) acts.push({ label: 'Chia sẻ / Lưu', run: async () => { try { await navigator.share({ text: shareText }); } catch {} return false; } });
+  acts.push({ label: doneLabel, cls: 'primary', run: () => true });
+  return modal({ title, locked: true, body: `<p class="code-help">${intro}</p><div class="code-box">${esc(secret)}</div>`, actions: acts });
+}
+const showRecoveryCode = (code) => showSecret({
+  title: 'Mã khôi phục của bạn',
+  intro: 'Hãy <b>lưu mã này ở nơi an toàn</b> (chụp màn hình, Ghi chú, gửi cho chính mình…). Khi quên mật khẩu, dùng email + mã này để đặt lại. Mã chỉ hiện <b>một lần</b>.',
+  secret: code,
+  shareText: `Mã khôi phục tài khoản Ví (vi.nhv.me) của ${state.user?.email || $('#authEmail').value}: ${code}`,
+});
+async function newRecoveryCode() {
+  const r = await modal({
+    title: state.user?.has_recovery ? 'Tạo mã khôi phục mới' : 'Tạo mã khôi phục',
+    body: `<p class="code-help">${state.user?.has_recovery ? 'Mã cũ sẽ không dùng được nữa. ' : ''}Nhập mật khẩu để xác nhận.</p>` + field('rcPw', 'Mật khẩu hiện tại', '', 'password', 'autocomplete="current-password"'),
+    actions: [{ label: 'Huỷ' }, { label: 'Tạo mã', cls: 'primary', run: () => api('/me/recovery', { method: 'POST', body: { password: $('#rcPw').value } }) }],
+  });
+  if (r?.recovery_code) {
+    state.user.has_recovery = true; LS.set('user', state.user); render();
+    await showRecoveryCode(r.recovery_code);
+  }
+}
+async function forgotPassword() {
+  const r = await modal({
+    title: 'Quên mật khẩu',
+    body: `<p class="code-help">Nhập email và <b>mã khôi phục</b> bạn đã lưu khi đăng ký. Nếu không còn mã, hãy nhờ quản trị viên đặt lại mật khẩu.</p>`
+      + field('fgEmail', 'Email', $('#authEmail').value, 'email', 'autocomplete="email" inputmode="email"')
+      + field('fgCode', 'Mã khôi phục (XXXX-XXXX-XXXX-XXXX)', '', 'text', 'autocapitalize="characters" autocomplete="off" spellcheck="false"')
+      + field('fgPw', 'Mật khẩu mới (ít nhất 6 ký tự)', '', 'password', 'autocomplete="new-password"'),
+    actions: [{ label: 'Huỷ' }, { label: 'Đặt lại', cls: 'primary', run: () => api('/auth/recover', { method: 'POST', body: { email: $('#fgEmail').value, code: $('#fgCode').value, password: $('#fgPw').value } }) }],
+  });
+  if (!r?.ok) return;
+  LS.set('outbox', []); state.outbox = [];
+  toast('Đã đặt lại mật khẩu');
+  await showSecret({
+    title: 'Mã khôi phục mới',
+    intro: 'Mã cũ vừa được dùng nên đã hết hiệu lực. Hãy <b>lưu mã mới</b> này.',
+    secret: r.recovery_code,
+    shareText: `Mã khôi phục tài khoản Ví (vi.nhv.me): ${r.recovery_code}`,
+  });
+  await boot();
+}
+async function forceNewPassword() {
+  await modal({
+    title: 'Đặt mật khẩu mới', locked: true,
+    body: '<p class="code-help">Bạn đang dùng mật khẩu tạm do quản trị viên cấp. Hãy đặt mật khẩu mới để tiếp tục.</p>' + field('fpPw', 'Mật khẩu mới (ít nhất 6 ký tự)', '', 'password', 'autocomplete="new-password"'),
+    actions: [{ label: 'Lưu mật khẩu', cls: 'primary', run: async () => {
+      await api('/me/password', { method: 'POST', body: { next: $('#fpPw').value } });
+      state.user.must_change_pw = false; LS.set('user', state.user);
+    } }],
+  });
+  toast('Đã đổi mật khẩu');
+  if (!state.user.has_recovery) newRecoveryCode();
+}
+
+/* ---------- admin ---------- */
+let adminUsers = [];
+let adminT;
+async function loadAdminUsers() {
+  if (!state.user?.is_admin) return;
+  try {
+    adminUsers = await api('/admin/users?q=' + encodeURIComponent($('#adminSearch').value));
+    renderAdminUsers();
+  } catch (e) { $('#adminUsers').innerHTML = `<p class="muted small">${esc(e.message)}</p>`; }
+}
+function renderAdminUsers() {
+  $('#adminCount').textContent = adminUsers.length + ' người dùng';
+  $('#adminUsers').innerHTML = adminUsers.map((u) => `<button class="admin-user" data-uid="${esc(u.id)}">
+      <span class="avatar">${esc(initials(u.name))}</span>
+      <span class="acc-main"><b>${esc(u.name)}${u.is_admin ? '<span class="badge">Admin</span>' : ''}${u.has_recovery ? '' : '<span class="badge warn">chưa có mã</span>'}</b><span class="muted small">${esc(u.email)}</span></span>
+      <span class="chev">›</span></button>`).join('') || '<p class="muted small">Không tìm thấy.</p>';
+}
+const fmtTime = (t) => (t ? new Date(t).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+async function openAdminUser(id) {
+  const u = adminUsers.find((x) => x.id === id); if (!u) return;
+  const self = u.id === state.user.id;
+  const r = await modal({
+    title: u.name,
+    body: `<div class="kv"><span>Email</span><b>${esc(u.email)}</b><span>Đăng ký</span><b>${fmtTime(u.created_at)}</b>
+      <span>Đăng nhập gần nhất</span><b>${fmtTime(u.last_login)}</b><span>Số sổ</span><b>${u.books}</b>
+      <span>Mã khôi phục</span><b>${u.has_recovery ? 'Đã có' : 'Chưa có'}</b><span>Vai trò</span><b>${u.is_admin ? 'Quản trị viên' : 'Người dùng'}</b></div>`,
+    stack: true,
+    actions: [
+      { label: '🔑 Đặt lại mật khẩu', run: () => 'reset' },
+      ...(self ? [] : [{ label: u.is_admin ? 'Bỏ quyền quản trị' : 'Cấp quyền quản trị', run: () => 'admin' }]),
+      { label: 'Đóng' },
+    ],
+  });
+  if (r === 'reset') {
+    if (!confirm(`Đặt lại mật khẩu cho ${u.email}? Họ sẽ bị đăng xuất khỏi mọi thiết bị.`)) return;
+    try {
+      const { temp_password } = await api(`/admin/users/${u.id}/reset`, { method: 'POST' });
+      await showSecret({
+        title: 'Mật khẩu tạm',
+        intro: `Gửi mật khẩu này cho <b>${esc(u.name)}</b>. Khi đăng nhập bằng <b>${esc(u.email)}</b>, họ sẽ được yêu cầu đặt mật khẩu mới.`,
+        secret: temp_password,
+        shareText: `Mật khẩu tạm để đăng nhập Ví (https://vi.nhv.me) với email ${u.email}: ${temp_password}\nSau khi đăng nhập, bạn sẽ được yêu cầu đặt mật khẩu mới.`,
+        doneLabel: 'Xong',
+      });
+    } catch (e) { toast(e.message); }
+  }
+  if (r === 'admin') {
+    try { await api(`/admin/users/${u.id}/admin`, { method: 'POST', body: { is_admin: !u.is_admin } }); await loadAdminUsers(); toast('Đã cập nhật quyền'); }
+    catch (e) { toast(e.message); }
+  }
 }
 
 /* ---------- auth ---------- */
@@ -857,6 +976,11 @@ function bind() {
   $('#exportJson').addEventListener('click', exportJson);
   $('#importJson').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importJson(f); e.target.value = ''; });
   $('#logoutBtn').addEventListener('click', logout);
+  $('#forgotBtn').addEventListener('click', forgotPassword);
+  $('#recoveryBtn').addEventListener('click', newRecoveryCode);
+  $('#recoveryNoticeBtn').addEventListener('click', newRecoveryCode);
+  $('#adminSearch').addEventListener('input', () => { clearTimeout(adminT); adminT = setTimeout(loadAdminUsers, 250); });
+  $('#adminUsers').addEventListener('click', (e) => { const b = e.target.closest('[data-uid]'); if (b) openAdminUser(b.dataset.uid); });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-book-switch]')) { haptic(); openBookSwitcher(); } });
   $('#shareInvite').addEventListener('click', shareInvite);
   $('#regenInvite').addEventListener('click', async () => {
@@ -928,12 +1052,13 @@ function bind() {
     const btn = $('#authSubmit'); btn.disabled = true;
     try {
       const body = { email: $('#authEmail').value, password: $('#pw').value, name: $('#authName').value };
-      await api(authMode === 'register' ? '/auth/register' : '/auth/login', { method: 'POST', body });
+      const r = await api(authMode === 'register' ? '/auth/register' : '/auth/login', { method: 'POST', body });
       $('#pw').value = '';
       LS.set('outbox', []); state.outbox = [];
+      if (r.recovery_code) await showRecoveryCode(r.recovery_code);
       await boot();
     } catch (err) {
-      $('#loginErr').textContent = err.auth ? 'Email hoặc mật khẩu không đúng' : err.status ? err.message : 'Không kết nối được máy chủ';
+      $('#loginErr').textContent = err.status ? err.message : 'Không kết nối được máy chủ';
     } finally { btn.disabled = false; }
   });
 
@@ -957,6 +1082,7 @@ async function boot() {
     await flush();
     await loadAll(); lastRefresh = Date.now();
     showApp();
+    if (state.user.must_change_pw) await forceNewPassword();
     const code = LS.get('pendingJoin', null);
     if (code) { LS.set('pendingJoin', null); joinDialog(code); }
   } catch (e) {
