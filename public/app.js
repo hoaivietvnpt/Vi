@@ -3,14 +3,19 @@
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const LS = {
-  get(k, d) { try { const v = localStorage.getItem('vi:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('vi:' + k, JSON.stringify(v)); } catch {} },
+  get(k, d) { try { const v = localStorage.getItem('vi2:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('vi2:' + k, JSON.stringify(v)); } catch {} },
+  clear() { try { Object.keys(localStorage).filter((k) => k.startsWith('vi')).forEach((k) => localStorage.removeItem(k)); } catch {} },
 };
 
 const sheet = document.getElementById('sheet');
 const state = {
-  txs: LS.get('txs', []),
-  cats: LS.get('cats', []),
+  user: LS.get('user', null),
+  books: LS.get('books', []),
+  bookId: LS.get('bookId', null),
+  members: [],
+  txs: [],
+  cats: [],
   outbox: LS.get('outbox', []),
   tab: 'home',
   listMonth: monthStart(new Date()),
@@ -85,7 +90,19 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function persist() { LS.set('txs', state.txs); LS.set('cats', state.cats); LS.set('outbox', state.outbox); }
+function persist() {
+  LS.set('outbox', state.outbox);
+  if (!state.bookId) return;
+  LS.set('txs:' + state.bookId, state.txs); LS.set('cats:' + state.bookId, state.cats); LS.set('members:' + state.bookId, state.members);
+}
+function loadCache() {
+  state.txs = LS.get('txs:' + state.bookId, []);
+  state.cats = LS.get('cats:' + state.bookId, []);
+  state.members = LS.get('members:' + state.bookId, []);
+}
+const bp = (p) => `/books/${state.bookId}${p}`;
+const curBook = () => state.books.find((b) => b.id === state.bookId);
+const isShared = () => (curBook()?.members || 0) > 1;
 
 let flushing = false;
 async function flush() {
@@ -114,11 +131,14 @@ function queue(method, path, body) {
 function updateSync() { $('#syncBadge').hidden = !state.outbox.length; }
 
 async function loadAll() {
-  const [cats, txs] = await Promise.all([api('/categories'), api('/transactions')]);
-  state.cats = cats;
+  const bookId = state.bookId;
+  const [cats, txs, members] = await Promise.all([api(bp('/categories')), api(bp('/transactions')), api(bp('/members'))]);
+  if (bookId !== state.bookId) return; // switched meanwhile
+  state.cats = cats; state.members = members;
   // keep pending local creates that the server doesn't have yet
-  const pendingIds = new Set(state.outbox.filter((o) => o.method !== 'DELETE').map((o) => o.body?.id).filter(Boolean));
-  const deleted = new Set(state.outbox.filter((o) => o.method === 'DELETE').map((o) => o.path.split('/').pop()));
+  const mine = state.outbox.filter((o) => o.path.startsWith(bp('/transactions')));
+  const pendingIds = new Set(mine.filter((o) => o.method !== 'DELETE').map((o) => o.body?.id || o.path.split('/').pop()));
+  const deleted = new Set(mine.filter((o) => o.method === 'DELETE').map((o) => o.path.split('/').pop()));
   const server = new Map(txs.map((t) => [t.id, t]));
   for (const t of state.txs) if (pendingIds.has(t.id)) server.set(t.id, t);
   state.txs = [...server.values()].filter((t) => !deleted.has(t.id));
@@ -140,6 +160,8 @@ function go(tab) {
   render();
 }
 function render() {
+  const b = curBook();
+  $$('.book-pill').forEach((el) => { el.querySelector('.bp-ic').textContent = b?.icon || '📒'; el.querySelector('.bp-name').textContent = b?.name || 'Sổ'; });
   if (state.tab === 'home') renderHome();
   if (state.tab === 'list') renderList();
   if (state.tab === 'report') renderReport();
@@ -150,12 +172,19 @@ function render() {
 /* ---------- transaction row ---------- */
 function txRow(t) {
   const c = catById(t.category_id);
+  const who = isShared() && t.created_by ? memberName(t.created_by) : '';
+  const sub = [who && `<span class="tx-who">${esc(who)}</span>`, t.note && esc(t.note)].filter(Boolean).join(' · ');
   return `<button class="tx" data-id="${esc(t.id)}">
     <span class="tx-ic" style="background:${c.color}1f">${esc(c.icon)}</span>
-    <span class="tx-main"><span class="tx-cat">${esc(c.name)}</span>${t.note ? `<span class="tx-note">${esc(t.note)}</span>` : ''}</span>
+    <span class="tx-main"><span class="tx-cat">${esc(c.name)}</span>${sub ? `<span class="tx-note">${sub}</span>` : ''}</span>
     <span class="tx-amt ${t.type === 'income' ? 'inc' : ''}">${signed(t.amount, t.type)}</span>
   </button>`;
 }
+function memberName(id) {
+  if (id === state.user?.id) return 'Bạn';
+  return state.members.find((m) => m.id === id)?.name || 'Thành viên cũ';
+}
+const initials = (name) => (name || '?').trim().split(/\s+/).slice(-1)[0].slice(0, 1).toUpperCase();
 const emptyBox = (msg) => `<div class="empty"><span class="big">🌱</span>${msg}</div>`;
 
 /* ---------- HOME ---------- */
@@ -300,6 +329,25 @@ function renderReport() {
     trend.push({ label: 'T' + (f.getMonth() + 1), title: monthLabel(f), inc: sum(l, 'income'), exp: sum(l, 'expense') });
   }
   barChart($('#trendChart'), trend, { series: ['inc', 'exp'], height: 190 });
+
+  // per member (shared books)
+  $('#memberCard').hidden = !isShared();
+  if (isShared()) {
+    const by = new Map();
+    for (const t of list) {
+      const k = t.created_by || '';
+      const o = by.get(k) || { inc: 0, exp: 0 };
+      o[t.type === 'income' ? 'inc' : 'exp'] += t.amount; by.set(k, o);
+    }
+    const mrows = [...by.entries()].sort((a, b) => b[1].exp - a[1].exp);
+    const maxE = Math.max(1, ...mrows.map(([, v]) => v.exp));
+    $('#memberBreakdown').innerHTML = mrows.length ? mrows.map(([id, v]) => `<div class="cat-row">
+        <span class="ic avatar">${esc(initials(memberName(id)))}</span>
+        <span class="nm">${esc(memberName(id))} <small>${v.inc ? 'thu ' + compact(v.inc) : ''}</small></span>
+        <span class="am">${nf.format(v.exp)}</span>
+        <span class="bar"><i style="width:${Math.max((v.exp / maxE) * 100, 1.5)}%;background:var(--exp)"></i></span>
+      </div>`).join('') : emptyBox('Chưa có dữ liệu trong kỳ này.');
+  }
 
   // facts
   const exps = list.filter((t) => t.type === 'expense');
@@ -512,12 +560,12 @@ function save(keepOpen = false) {
   if (form.id) {
     const t = state.txs.find((x) => x.id === form.id);
     Object.assign(t, body, { updated_at: Date.now() });
-    queue('PUT', '/transactions/' + form.id, body);
+    queue('PUT', bp('/transactions/' + form.id), body);
     toast('Đã cập nhật');
   } else {
     const t = { id: uuid(), ...body, created_at: Date.now(), updated_at: Date.now() };
     state.txs.push(t);
-    queue('POST', '/transactions', t);
+    queue('POST', bp('/transactions'), t);
     toast(`Đã lưu ${body.type === 'income' ? '+' : '−'}${money(amount)}`);
   }
   sortTxs(); persist(); render();
@@ -526,13 +574,33 @@ function save(keepOpen = false) {
 function removeTx() {
   if (!form.id || !confirm('Xoá giao dịch này?')) return;
   state.txs = state.txs.filter((x) => x.id !== form.id);
-  queue('DELETE', '/transactions/' + form.id);
+  queue('DELETE', bp('/transactions/' + form.id));
   persist(); render(); closeSheet(); toast('Đã xoá');
 }
 
 /* ---------- SETTINGS ---------- */
 const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#0EA5E9', '#14B8A6', '#A16207', '#64748B'];
 function renderSettings() {
+  const u = state.user || {};
+  $('#accAvatar').textContent = initials(u.name);
+  $('#accName').textContent = u.name || '';
+  $('#accEmail').textContent = u.email || '';
+  const b = curBook() || {};
+  const owner = b.role === 'owner';
+  $('#bookIcon').textContent = b.icon || '📒';
+  $('#bookName').textContent = b.name || '';
+  $('#bookMeta').textContent = `${b.members || 1} thành viên · ${owner ? 'Bạn là chủ sổ' : 'Thành viên'}`;
+  $('#inviteBox').hidden = !owner;
+  $('#inviteCode').textContent = b.invite_code || '';
+  $('#memberList').innerHTML = (b.members || 1) > 1 ? state.members.map((m) => `<div class="member">
+      <span class="avatar">${esc(initials(m.name))}</span>
+      <div class="acc-main"><b>${esc(m.name)}${m.id === u.id ? ' (bạn)' : ''}</b><span class="role">${m.role === 'owner' ? 'Chủ sổ' : 'Thành viên'}${m.email ? ' · ' + esc(m.email) : ''}</span></div>
+      ${owner && m.role !== 'owner' ? `<button class="rm" data-rm="${esc(m.id)}">Xoá</button>` : ''}
+    </div>`).join('') : '';
+  $('#renameBookBtn').hidden = !owner;
+  $('#deleteBookBtn').hidden = !owner || state.books.length < 2;
+  $('#leaveBookBtn').hidden = owner;
+
   $$('#catType button').forEach((b) => b.classList.toggle('on', b.dataset.t === state.catType));
   const cats = state.cats.filter((c) => c.type === state.catType && !c.archived);
   $('#catManage').innerHTML = cats.map((c) => `<button class="cat-item" data-cat="${esc(c.id)}"><span class="ic" style="background:${c.color}22">${esc(c.icon)}</span><span class="nm">${esc(c.name)}</span><span class="chev">›</span></button>`).join('');
@@ -551,15 +619,15 @@ async function saveCat() {
   const name = $('#catName').value.trim(); if (!name) return $('#catName').focus();
   const body = { name, icon: $('#catIcon').value.trim() || '🏷️', color: editingCat.color, type: editingCat.type };
   try {
-    if (editingCat.id) { const r = await api('/categories/' + editingCat.id, { method: 'PUT', body }); Object.assign(editingCat, r); }
-    else state.cats.push(await api('/categories', { method: 'POST', body }));
+    if (editingCat.id) { const r = await api(bp('/categories/' + editingCat.id), { method: 'PUT', body }); Object.assign(editingCat, r); }
+    else state.cats.push(await api(bp('/categories'), { method: 'POST', body }));
     persist(); closeCatDialog(); render(); toast('Đã lưu danh mục');
   } catch (e) { toast(e.auth ? 'Hết phiên đăng nhập' : 'Cần kết nối mạng để sửa danh mục'); }
 }
 async function deleteCat() {
   if (!confirm(`Xoá danh mục "${editingCat.name}"? Giao dịch cũ vẫn được giữ.`)) return;
   try {
-    await api('/categories/' + editingCat.id, { method: 'DELETE' });
+    await api(bp('/categories/' + editingCat.id), { method: 'DELETE' });
     const used = state.txs.some((t) => t.category_id === editingCat.id);
     if (used) editingCat.archived = 1; else state.cats = state.cats.filter((c) => c.id !== editingCat.id);
     persist(); closeCatDialog(); render();
@@ -578,7 +646,7 @@ function exportCsv() {
   download(`vi-thu-chi-${ymd(new Date())}.csv`, '﻿' + lines.join('\n'), 'text/csv;charset=utf-8');
 }
 function exportJson() {
-  download(`vi-backup-${ymd(new Date())}.json`, JSON.stringify({ version: 1, exported_at: new Date().toISOString(), categories: state.cats, transactions: state.txs }, null, 1), 'application/json');
+  download(`vi-backup-${ymd(new Date())}.json`, JSON.stringify({ version: 2, book: curBook()?.name, exported_at: new Date().toISOString(), categories: state.cats, transactions: state.txs }, null, 1), 'application/json');
 }
 async function importJson(file) {
   try {
@@ -586,7 +654,7 @@ async function importJson(file) {
     const txs = Array.isArray(data) ? data : data.transactions;
     if (!Array.isArray(txs)) throw new Error();
     if (!confirm(`Nhập ${txs.length} giao dịch? (Giao dịch trùng sẽ được bỏ qua)`)) return;
-    const r = await api('/import', { method: 'POST', body: { transactions: txs } });
+    const r = await api(bp('/import'), { method: 'POST', body: { transactions: txs, categories: data.categories || [] } });
     await loadAll(); render(); toast(`Đã nhập ${r.imported} giao dịch`);
   } catch (e) { toast(e.auth ? 'Hết phiên đăng nhập' : 'File không hợp lệ hoặc mất mạng'); }
 }
@@ -598,12 +666,117 @@ function toast(msg) {
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1900);
 }
 
+/* ---------- modal ---------- */
+function modal({ title, body = '', actions = [], stack = false, onOpen }) {
+  return new Promise((resolve) => {
+    $('#modalTitle').textContent = title;
+    $('#modalBody').innerHTML = body;
+    $('#modalErr').textContent = '';
+    const acts = $('#modalActions');
+    acts.className = 'dlg-actions' + (stack ? ' stack' : '');
+    acts.innerHTML = actions.map((a, i) => `<button class="btn ${a.cls || 'ghost'}" data-i="${i}">${esc(a.label)}</button>`).join('');
+    const close = (v) => { $('#modal').hidden = true; $('#modalBackdrop').hidden = true; resolve(v); };
+    acts.onclick = async (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      const a = actions[+b.dataset.i];
+      if (!a.run) return close(null);
+      b.disabled = true;
+      try { const v = await a.run(); if (v !== false) close(v ?? true); }
+      catch (err) { $('#modalErr').textContent = err.auth ? 'Hết phiên đăng nhập' : err.message || 'Lỗi, thử lại'; }
+      finally { b.disabled = false; }
+    };
+    $('#modalBody').onclick = (e) => { const b = e.target.closest('[data-pick]'); if (b) close(b.dataset.pick); };
+    $('#modalBackdrop').onclick = () => close(null);
+    $('#modal').hidden = false; $('#modalBackdrop').hidden = false; $('#modalBackdrop').classList.add('show');
+    onOpen?.();
+    const f = $('#modalBody input'); if (f) setTimeout(() => f.focus(), 50);
+    $('#modalBody').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); acts.querySelector('.primary')?.click(); } };
+  });
+}
+const field = (id, ph, val = '', type = 'text', extra = '') => `<input class="modal-field" id="${id}" type="${type}" placeholder="${esc(ph)}" value="${esc(val)}" ${extra} />`;
+
+/* ---------- books ---------- */
+async function switchBook(id) {
+  if (id === state.bookId) return;
+  state.bookId = id; LS.set('bookId', id);
+  loadCache(); state.listCat = null; render();
+  try { await loadAll(); render(); } catch (e) { if (e.auth) showLogin(); }
+}
+async function refreshMe() {
+  const me = await api('/me');
+  state.user = me.user; state.books = me.books;
+  LS.set('user', me.user); LS.set('books', me.books);
+  if (!state.books.some((b) => b.id === state.bookId)) { state.bookId = state.books[0]?.id || null; LS.set('bookId', state.bookId); loadCache(); }
+}
+async function openBookSwitcher() {
+  const list = state.books.map((b) => `<button class="book-opt" data-pick="${esc(b.id)}">
+      <span class="book-ic">${esc(b.icon)}</span>
+      <span class="acc-main"><b>${esc(b.name)}</b><span class="muted small">${b.members > 1 ? b.members + ' thành viên' : 'Cá nhân'}${b.role === 'owner' ? '' : ' · được mời'}</span></span>
+      ${b.id === state.bookId ? '<span class="check">✓</span>' : ''}</button>`).join('');
+  const r = await modal({
+    title: 'Chọn sổ', body: `<div class="book-opts">${list}</div>`, stack: true,
+    actions: [
+      { label: '＋ Tạo sổ mới', run: () => 'new' },
+      { label: '🔗 Tham gia bằng mã mời', run: () => 'join' },
+      { label: 'Đóng' },
+    ],
+  });
+  if (r === 'new') return createBookDialog();
+  if (r === 'join') return joinDialog();
+  if (r && r !== true) switchBook(r);
+}
+async function createBookDialog() {
+  const b = await modal({
+    title: 'Tạo sổ mới',
+    body: `<div class="dlg-row">${field('nbIcon', '', '👪', 'text', 'maxlength="4" style="width:56px;flex:none;text-align:center;font-size:22px"')}${field('nbName', 'Tên sổ, vd: Gia đình', '', 'text', 'maxlength="40"')}</div>
+      <p class="muted small">Sau khi tạo, gửi mã mời cho người thân để cùng ghi chép.</p>`,
+    actions: [{ label: 'Huỷ' }, { label: 'Tạo sổ', cls: 'primary', run: async () => {
+      const name = $('#nbName').value.trim(); if (!name) { $('#nbName').focus(); return false; }
+      return api('/books', { method: 'POST', body: { name, icon: $('#nbIcon').value.trim() || '📒' } });
+    } }],
+  });
+  if (b && b.id) { state.books.push(b); LS.set('books', state.books); await switchBook(b.id); toast('Đã tạo sổ ' + b.name); }
+}
+async function joinDialog(code = '') {
+  const b = await modal({
+    title: 'Tham gia sổ chung',
+    body: field('joinCode', 'Mã mời 8 ký tự', code, 'text', 'maxlength="8" autocapitalize="characters" autocomplete="off" class="modal-field code"').replace('class="modal-field"', ''),
+    actions: [{ label: 'Huỷ' }, { label: 'Tham gia', cls: 'primary', run: () => api('/books/join', { method: 'POST', body: { code: $('#joinCode').value } }) }],
+  });
+  if (b && b.id) { await refreshMe(); await switchBook(b.id); render(); toast('Đã tham gia ' + b.name); }
+}
+async function shareInvite() {
+  const b = curBook(); if (!b?.invite_code) return;
+  const url = `${location.origin}/?join=${b.invite_code}`;
+  const text = `Tham gia sổ "${b.name}" trên Ví: ${url} (mã ${b.invite_code})`;
+  try {
+    if (navigator.share) await navigator.share({ title: 'Ví – mời tham gia sổ', text, url });
+    else { await navigator.clipboard.writeText(text); toast('Đã sao chép link mời'); }
+  } catch {}
+}
+
 /* ---------- auth ---------- */
+let authMode = 'login';
+function setAuthMode(m) {
+  authMode = m;
+  $$('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  $('#authName').hidden = m !== 'register';
+  $('#authSubmit').textContent = m === 'register' ? 'Tạo tài khoản' : 'Đăng nhập';
+  $('#pw').autocomplete = m === 'register' ? 'new-password' : 'current-password';
+  $('#pw').placeholder = m === 'register' ? 'Mật khẩu (ít nhất 6 ký tự)' : 'Mật khẩu';
+  $('#loginErr').textContent = '';
+}
 function showLogin() {
   $('#login').hidden = false; $('#main').hidden = true; $('#tabbar').hidden = true;
-  setTimeout(() => $('#pw').focus(), 50);
+  $('#joinHint').hidden = !LS.get('pendingJoin', null);
+  setTimeout(() => $('#authEmail').focus(), 50);
 }
 function showApp() { $('#login').hidden = true; $('#main').hidden = false; $('#tabbar').hidden = false; render(); }
+async function logout() {
+  if (!confirm('Đăng xuất khỏi thiết bị này?')) return;
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  LS.clear(); location.replace('/');
+}
 
 /* ---------- events ---------- */
 function bind() {
@@ -683,21 +856,85 @@ function bind() {
   $('#exportCsv').addEventListener('click', exportCsv);
   $('#exportJson').addEventListener('click', exportJson);
   $('#importJson').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importJson(f); e.target.value = ''; });
-  $('#logoutBtn').addEventListener('click', async () => {
-    if (!confirm('Đăng xuất khỏi thiết bị này?')) return;
-    await api('/logout', { method: 'POST' }).catch(() => {});
-    localStorage.clear(); location.reload();
+  $('#logoutBtn').addEventListener('click', logout);
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-book-switch]')) { haptic(); openBookSwitcher(); } });
+  $('#shareInvite').addEventListener('click', shareInvite);
+  $('#regenInvite').addEventListener('click', async () => {
+    if (!confirm('Tạo mã mời mới? Mã cũ sẽ không dùng được nữa.')) return;
+    try { const r = await api(bp('/invite'), { method: 'POST' }); curBook().invite_code = r.invite_code; LS.set('books', state.books); renderSettings(); }
+    catch (e) { toast(e.message); }
   });
+  $('#memberList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-rm]'); if (!b) return;
+    const m = state.members.find((x) => x.id === b.dataset.rm);
+    if (!confirm(`Xoá ${m?.name || 'thành viên'} khỏi sổ? Giao dịch họ đã nhập vẫn được giữ.`)) return;
+    try { await api(bp('/members/' + b.dataset.rm), { method: 'DELETE' }); await refreshMe(); await loadAll(); render(); }
+    catch (err) { toast(err.message); }
+  });
+  $('#renameBookBtn').addEventListener('click', async () => {
+    const b = curBook();
+    const ok = await modal({
+      title: 'Đổi tên sổ',
+      body: `<div class="dlg-row">${field('rbIcon', '', b.icon, 'text', 'maxlength="4" style="width:56px;flex:none;text-align:center;font-size:22px"')}${field('rbName', 'Tên sổ', b.name, 'text', 'maxlength="40"')}</div>`,
+      actions: [{ label: 'Huỷ' }, { label: 'Lưu', cls: 'primary', run: async () => {
+        const name = $('#rbName').value.trim(); if (!name) return false;
+        await api(bp(''), { method: 'PUT', body: { name, icon: $('#rbIcon').value.trim() } });
+        Object.assign(b, { name, icon: $('#rbIcon').value.trim() || b.icon });
+      } }],
+    });
+    if (ok) { LS.set('books', state.books); render(); }
+  });
+  $('#leaveBookBtn').addEventListener('click', async () => {
+    const b = curBook();
+    if (!confirm(`Rời sổ "${b.name}"? Bạn sẽ không xem được sổ này nữa.`)) return;
+    try {
+      await api(bp('/members/' + state.user.id), { method: 'DELETE' });
+      state.bookId = null; await refreshMe(); loadCache(); await loadAll(); render(); toast('Đã rời sổ');
+    } catch (err) { toast(err.message); }
+  });
+  $('#deleteBookBtn').addEventListener('click', async () => {
+    const b = curBook();
+    const typed = prompt(`Xoá vĩnh viễn sổ "${b.name}" và toàn bộ giao dịch của nó?\nGõ tên sổ để xác nhận:`);
+    if (typed == null) return;
+    if (typed.trim() !== b.name) return toast('Tên sổ không khớp');
+    try {
+      await api(bp(''), { method: 'DELETE' });
+      state.bookId = null; await refreshMe(); loadCache(); await loadAll(); render(); toast('Đã xoá sổ');
+    } catch (err) { toast(err.message); }
+  });
+  $('#editNameBtn').addEventListener('click', async () => {
+    const ok = await modal({
+      title: 'Tên hiển thị', body: field('nmInput', 'Tên của bạn', state.user.name, 'text', 'maxlength="40"'),
+      actions: [{ label: 'Huỷ' }, { label: 'Lưu', cls: 'primary', run: async () => {
+        const r = await api('/me', { method: 'PUT', body: { name: $('#nmInput').value } }); state.user.name = r.name;
+      } }],
+    });
+    if (ok) { LS.set('user', state.user); await loadAll().catch(() => {}); render(); }
+  });
+  $('#changePwBtn').addEventListener('click', () => modal({
+    title: 'Đổi mật khẩu',
+    body: field('pwCur', 'Mật khẩu hiện tại', '', 'password', 'autocomplete="current-password"') + field('pwNew', 'Mật khẩu mới (ít nhất 6 ký tự)', '', 'password', 'autocomplete="new-password"'),
+    actions: [{ label: 'Huỷ' }, { label: 'Đổi', cls: 'primary', run: async () => {
+      await api('/me/password', { method: 'POST', body: { current: $('#pwCur').value, next: $('#pwNew').value } });
+      toast('Đã đổi mật khẩu · các thiết bị khác đã bị đăng xuất');
+    } }],
+  }));
 
-  // login
+  // auth
+  $('#authTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setAuthMode(b.dataset.mode); });
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('#loginErr').textContent = '';
+    const btn = $('#authSubmit'); btn.disabled = true;
     try {
-      await api('/login', { method: 'POST', body: { password: $('#pw').value } });
+      const body = { email: $('#authEmail').value, password: $('#pw').value, name: $('#authName').value };
+      await api(authMode === 'register' ? '/auth/register' : '/auth/login', { method: 'POST', body });
       $('#pw').value = '';
+      LS.set('outbox', []); state.outbox = [];
       await boot();
-    } catch (err) { $('#loginErr').textContent = err.status === 401 ? 'Sai mật khẩu' : 'Không kết nối được máy chủ'; }
+    } catch (err) {
+      $('#loginErr').textContent = err.auth ? 'Email hoặc mật khẩu không đúng' : err.status ? err.message : 'Không kết nối được máy chủ';
+    } finally { btn.disabled = false; }
   });
 
   window.addEventListener('online', flush);
@@ -714,21 +951,29 @@ async function refresh() {
 
 async function boot() {
   try {
-    const me = await api('/me');
-    $('#logoutCard').hidden = !me.protected;
+    await refreshMe();
+    if (!state.bookId) throw new Error('no book');
+    loadCache();
     await flush();
     await loadAll(); lastRefresh = Date.now();
     showApp();
+    const code = LS.get('pendingJoin', null);
+    if (code) { LS.set('pendingJoin', null); joinDialog(code); }
   } catch (e) {
     if (e.auth) return showLogin();
-    // offline: use cache
-    if (state.cats.length) { showApp(); toast('Đang ngoại tuyến – dữ liệu sẽ đồng bộ sau'); }
+    if (state.user && state.bookId && state.cats.length) { showApp(); toast('Đang ngoại tuyến – dữ liệu sẽ đồng bộ sau'); }
     else showLogin();
   }
 }
 
+(() => {
+  const q = new URLSearchParams(location.search);
+  const code = q.get('join');
+  if (code) { LS.set('pendingJoin', code.toUpperCase().slice(0, 8)); history.replaceState(null, '', '/'); }
+})();
+try { Object.keys(localStorage).filter((k) => k.startsWith('vi:')).forEach((k) => localStorage.removeItem(k)); } catch {}
 bind();
 updateSync();
-if (state.cats.length) showApp();
+if (state.user && state.bookId) { loadCache(); if (state.cats.length) showApp(); }
 boot();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

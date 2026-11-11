@@ -1,5 +1,5 @@
-const CACHE = 'vi-v2';
-const ASSETS = ['/', '/index.html', '/style.css?v=2', '/app.js?v=2', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/apple-touch-icon.png'];
+const CACHE = 'vi-v3';
+const ASSETS = ['/', '/index.html', '/style.css?v=3', '/app.js?v=3', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

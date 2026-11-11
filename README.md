@@ -15,7 +15,12 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
 - **Cài đặt**: thêm/sửa/xoá danh mục (emoji + màu), xuất CSV (mở bằng Excel), sao lưu/khôi phục JSON.
 - **PWA**: thêm vào màn hình chính iPhone, chế độ sáng/tối tự động, hoạt động ngoại tuyến
   (giao dịch nhập khi mất mạng sẽ tự đồng bộ khi có mạng lại).
-- **Bảo mật**: đăng nhập bằng mật khẩu (secret `APP_PASSWORD`), cookie phiên HttpOnly ký HMAC, lưu 1 năm.
+- **Nhiều người dùng**: đăng ký bằng email + mật khẩu. Mỗi người có *Sổ cá nhân* riêng, có thể tạo thêm sổ
+  (vd. *Gia đình*) và mời người khác bằng mã/link mời. Trong sổ chung, mỗi giao dịch ghi rõ ai nhập và báo cáo có
+  phần *Theo thành viên*. Chủ sổ có thể đổi mã mời, xoá thành viên, đổi tên hoặc xoá sổ; thành viên có thể rời sổ.
+- **Bảo mật**: mật khẩu băm PBKDF2-SHA256, phiên đăng nhập lưu trong D1 (cookie HttpOnly, 1 năm; đổi mật khẩu sẽ
+  đăng xuất các thiết bị khác), giới hạn số lần đăng nhập sai, kiểm tra quyền theo sổ ở mọi API, chặn CSRF theo Origin.
+  Tài khoản đăng ký **đầu tiên** sẽ nhận toàn bộ dữ liệu có từ trước khi bật chế độ nhiều người dùng.
 
 ## Thêm vào màn hình chính iPhone
 
@@ -26,10 +31,10 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
 ## Cấu trúc
 
 ```
-src/worker.js        API (/api/*) + phục vụ file tĩnh
+src/worker.js        API (/api/auth, /api/me, /api/books/:id/...) + phục vụ file tĩnh
 src/static.js        Nhúng các file trong public/ vào Worker
 public/              index.html, style.css, app.js, sw.js, manifest, icons
-migrations/          Schema D1 + danh mục mặc định
+migrations/          Schema D1 (0001 dữ liệu, 0002 tài khoản/sổ/thành viên)
 wrangler.jsonc       Cấu hình Worker, D1 (vi-db), custom domain vi.nhv.me
 ```
 
@@ -37,21 +42,12 @@ wrangler.jsonc       Cấu hình Worker, D1 (vi-db), custom domain vi.nhv.me
 
 ```bash
 npm install
-echo "APP_PASSWORD=matkhau" > .dev.vars
 npm run db:migrate:local
 npm run dev                 # http://localhost:8787
 
 npx wrangler login
 npm run deploy              # áp migration lên D1 rồi deploy
 ```
-
-Đổi mật khẩu đăng nhập:
-
-```bash
-npx wrangler secret put APP_PASSWORD
-```
-
-(Đổi mật khẩu sẽ đăng xuất mọi thiết bị.)
 
 ### Tự động deploy bằng GitHub Actions
 

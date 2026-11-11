@@ -15,7 +15,7 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=2" />
+  <link rel="stylesheet" href="/style.css?v=3" />
 </head>
 <body>
   <div id="app">
@@ -24,12 +24,19 @@
       <div class="login-card">
         <img src="/icons/icon.svg" alt="" width="72" height="72" class="login-logo" />
         <h1>Ví</h1>
-        <p class="muted">Nhập mật khẩu để tiếp tục</p>
-        <form id="loginForm">
-          <input id="pw" type="password" autocomplete="current-password" placeholder="Mật khẩu" required />
-          <button class="btn primary block" type="submit">Mở khoá</button>
+        <p class="muted">Quản lý thu chi hằng ngày</p>
+        <div class="seg" id="authTabs">
+          <button type="button" class="on" data-mode="login">Đăng nhập</button>
+          <button type="button" data-mode="register">Đăng ký</button>
+        </div>
+        <form id="loginForm" class="auth-form">
+          <input id="authName" type="text" autocomplete="name" placeholder="Tên của bạn" maxlength="40" hidden />
+          <input id="authEmail" type="email" autocomplete="email" inputmode="email" placeholder="Email" required />
+          <input id="pw" type="password" autocomplete="current-password" placeholder="Mật khẩu" required minlength="6" />
+          <button class="btn primary block" type="submit" id="authSubmit">Đăng nhập</button>
           <p id="loginErr" class="err" role="alert"></p>
         </form>
+        <p class="muted small" id="joinHint" hidden>Đăng nhập hoặc đăng ký để tham gia sổ chung.</p>
       </div>
     </section>
 
@@ -42,6 +49,7 @@
             <h1 class="title">Tổng quan</h1>
           </div>
           <span id="syncBadge" class="sync" hidden title="Đang chờ đồng bộ"></span>
+          <button class="book-pill" data-book-switch><span class="bp-ic"></span><span class="bp-name"></span><span class="chev">▾</span></button>
         </header>
 
         <div class="card balance">
@@ -82,6 +90,7 @@
       <section class="view" data-view="list" hidden>
         <header class="topbar">
           <h1 class="title">Sổ thu chi</h1>
+          <button class="book-pill" data-book-switch><span class="bp-ic"></span><span class="bp-name"></span><span class="chev">▾</span></button>
         </header>
         <div class="period-nav">
           <button class="icon-btn" data-list-nav="-1" aria-label="Tháng trước">‹</button>
@@ -105,6 +114,7 @@
       <section class="view" data-view="report" hidden>
         <header class="topbar">
           <h1 class="title">Báo cáo</h1>
+          <button class="book-pill" data-book-switch><span class="bp-ic"></span><span class="bp-name"></span><span class="chev">▾</span></button>
         </header>
         <div class="seg" id="reportMode">
           <button data-m="week">Tuần</button>
@@ -153,6 +163,11 @@
           <div id="trendChart" class="chart tall"></div>
         </div>
 
+        <div class="card" id="memberCard" hidden>
+          <div class="card-head"><h2>Theo thành viên</h2></div>
+          <div id="memberBreakdown"></div>
+        </div>
+
         <div class="card">
           <div class="card-head"><h2>Điểm nhấn</h2></div>
           <ul class="facts" id="facts"></ul>
@@ -162,6 +177,44 @@
       <!-- SETTINGS -->
       <section class="view" data-view="settings" hidden>
         <header class="topbar"><h1 class="title">Cài đặt</h1></header>
+
+        <div class="card">
+          <div class="card-head"><h2>Tài khoản</h2></div>
+          <div class="account">
+            <span class="avatar" id="accAvatar"></span>
+            <div class="acc-main"><b id="accName"></b><span class="muted small" id="accEmail"></span></div>
+          </div>
+          <div class="rows">
+            <button class="row-btn" id="editNameBtn"><span>✏️</span>Đổi tên hiển thị</button>
+            <button class="row-btn" id="changePwBtn"><span>🔑</span>Đổi mật khẩu</button>
+            <button class="row-btn danger" id="logoutBtn"><span>🚪</span>Đăng xuất</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Sổ hiện tại</h2>
+            <button class="link" data-book-switch>Đổi sổ</button>
+          </div>
+          <div class="book-cur">
+            <span class="book-ic" id="bookIcon"></span>
+            <div class="acc-main"><b id="bookName"></b><span class="muted small" id="bookMeta"></span></div>
+          </div>
+          <div id="inviteBox" class="invite" hidden>
+            <p class="muted small">Mã mời thành viên</p>
+            <div class="invite-row">
+              <code id="inviteCode"></code>
+              <button class="btn ghost sm" id="shareInvite">Chia sẻ</button>
+              <button class="icon-btn sm" id="regenInvite" aria-label="Tạo mã mới" title="Tạo mã mới">↻</button>
+            </div>
+          </div>
+          <div id="memberList"></div>
+          <div class="rows">
+            <button class="row-btn" id="renameBookBtn"><span>✏️</span>Đổi tên sổ</button>
+            <button class="row-btn danger" id="leaveBookBtn"><span>🚪</span>Rời sổ này</button>
+            <button class="row-btn danger" id="deleteBookBtn"><span>🗑️</span>Xoá sổ này</button>
+          </div>
+        </div>
 
         <div class="card">
           <div class="card-head">
@@ -193,10 +246,7 @@
           </ol>
         </div>
 
-        <div class="card" id="logoutCard" hidden>
-          <button class="btn ghost danger block" id="logoutBtn">Đăng xuất</button>
-        </div>
-        <p class="muted center small">Ví · v1.0</p>
+        <p class="muted center small">Ví · v2.0</p>
       </section>
     </main>
 
@@ -265,9 +315,18 @@
       </div>
     </div>
 
+    <!-- Generic modal -->
+    <div class="sheet-backdrop" id="modalBackdrop" hidden></div>
+    <div class="dialog" id="modal" hidden role="dialog">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <p class="err" id="modalErr"></p>
+      <div class="dlg-actions" id="modalActions"></div>
+    </div>
+
     <div class="toast" id="toast" role="status"></div>
     <div class="tooltip" id="tip" hidden></div>
   </div>
-  <script src="/app.js?v=2" defer></script>
+  <script src="/app.js?v=3" defer></script>
 </body>
 </html>

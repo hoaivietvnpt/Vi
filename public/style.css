@@ -279,3 +279,48 @@ h1, h2, h3, p { margin: 0; }
   #main { padding-bottom: 120px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------- multi-user ---------- */
+.topbar { gap: 10px; }
+.topbar > div { flex: 1; min-width: 0; }
+.topbar .title { flex: 1; }
+.book-pill { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px 0 8px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); font-size: 14px; font-weight: 600; max-width: 48%; margin-bottom: 4px; flex: none; }
+.book-pill .bp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.book-pill .chev { color: var(--muted); font-size: 11px; }
+.book-pill:active { transform: scale(.97); }
+.auth-form { display: flex; flex-direction: column; gap: 10px; }
+.auth-form .btn.block { margin-top: 4px; }
+#authTabs { margin-bottom: 14px; }
+.account, .book-cur { display: flex; align-items: center; gap: 12px; padding: 4px 0 10px; }
+.avatar, .book-ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; background: var(--surface-2); flex: none; }
+.book-ic { border-radius: 14px; font-size: 22px; }
+.acc-main { display: flex; flex-direction: column; min-width: 0; }
+.acc-main b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-btn.danger { color: var(--danger); }
+.invite { background: var(--surface-2); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; }
+.invite-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.invite-row code { flex: 1; font-size: 22px; font-weight: 750; letter-spacing: .12em; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.btn.sm { height: 36px; padding: 0 14px; font-size: 14px; background: var(--surface); }
+.icon-btn.sm { width: 36px; height: 36px; font-size: 18px; }
+.member { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.member:first-child { border-top: 0; }
+.member .avatar { width: 34px; height: 34px; font-size: 14px; }
+.member .acc-main { flex: 1; }
+.member .acc-main b { font-size: 15px; font-weight: 600; }
+.member .role { font-size: 12px; color: var(--muted); }
+.member .rm { color: var(--danger); font-size: 13px; font-weight: 600; padding: 6px; }
+#memberList { margin-bottom: 4px; }
+.book-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 4px; border-top: 1px solid var(--line); text-align: left; }
+.book-opt:first-child { border-top: 0; }
+.book-opt .book-ic { width: 38px; height: 38px; font-size: 19px; }
+.book-opt .acc-main { flex: 1; }
+.book-opt .check { font-weight: 700; }
+.book-opts { max-height: 50dvh; overflow-y: auto; margin: -4px 0 8px; }
+.modal-field { width: 100%; height: 46px; border-radius: 12px; border: 0; background: var(--surface-2); padding: 0 12px; outline: none; font-size: 16px; margin-bottom: 8px; }
+.modal-field.code { text-transform: uppercase; letter-spacing: .15em; font-weight: 700; text-align: center; font-size: 20px; }
+#modal .err { min-height: 0; margin: 0 0 8px !important; }
+#modal .err:empty { display: none; }
+#modalBackdrop { z-index: 40; }
+.dlg-actions .btn { flex: 1; }
+.dlg-actions.stack { flex-direction: column; align-items: stretch; }
+.tx-who { color: var(--text-2); font-weight: 550; }
