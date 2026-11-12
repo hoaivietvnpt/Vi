@@ -753,7 +753,7 @@ async function importJson(file) {
     if (!Array.isArray(txs)) throw new Error();
     if (!confirm(`Nhập ${txs.length} giao dịch? (Giao dịch trùng sẽ được bỏ qua)`)) return;
     const r = await api(bp('/import'), { method: 'POST', body: { transactions: txs, categories: data.categories || [], people: data.people || [] } });
-    await loadAll(); render(); toast(`Đã nhập ${r.imported} giao dịch`);
+    await loadAll(); render(); toast(`Đã nhập ${r.imported} giao dịch` + (r.skipped ? ` · bỏ qua ${r.skipped} trùng/lỗi` : ''));
   } catch (e) { toast(e.auth ? 'Hết phiên đăng nhập' : 'File không hợp lệ hoặc mất mạng'); }
 }
 

@@ -505,19 +505,39 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
       catMap.set(srcId, id);
       return id;
     };
-    let count = 0;
+    // An id already used in another book gets a stable per-book id, so re-importing the same file
+    // into this book is still recognised as a duplicate.
+    const lookup = async (ids) => {
+      const found = new Map();
+      for (let i = 0; i < ids.length; i += 90) {
+        const chunk = ids.slice(i, i + 90);
+        const { results } = await DB.prepare(`SELECT id, book_id FROM transactions WHERE id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk).all();
+        for (const x of results) found.set(x.id, x.book_id);
+      }
+      return found;
+    };
+    const srcId = (r) => (typeof r.id === 'string' && /^[\w-]{8,64}$/.test(r.id) ? r.id : null);
+    const existing = await lookup([...new Set(rows.map(srcId).filter(Boolean))]);
+    const remap = new Map();
+    for (const [id, bk] of existing) if (bk !== bookId) remap.set(id, 'imp-' + (await sha256(bookId + ':' + id)).slice(0, 32));
+    for (const [id, bk] of await lookup([...remap.values()])) if (bk === bookId) existing.set(id, bk);
+    let count = 0, skipped = 0;
+    const seen = new Set();
     const t = now();
     for (const r of rows) {
-      if (validateTx(r)) continue;
+      if (validateTx(r)) { skipped++; continue; }
+      let id = srcId(r) || uuid();
+      if (remap.has(id)) id = remap.get(id);
+      if (existing.get(id) === bookId || seen.has(id)) { skipped++; continue; }
+      seen.add(id);
       const cat = resolveCat(r.category_id, r.type);
-      const id = typeof r.id === 'string' && /^[\w-]{8,64}$/.test(r.id) ? r.id : uuid();
       stmts.push(DB.prepare(
         'INSERT OR IGNORE INTO transactions (id,type,amount,category_id,person_id,note,date,created_at,updated_at,book_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
       ).bind(id, r.type, Math.round(r.amount), cat, resolvePerson(r.person_id), String(r.note || '').slice(0, 200), r.date, Number(r.created_at) || t, t, bookId, user.id));
       count++;
     }
     for (let i = 0; i < stmts.length; i += 100) await DB.batch(stmts.slice(i, i + 100));
-    return json({ ok: true, imported: count });
+    return json({ ok: true, imported: count, skipped });
   }
 
   return bad('Not found', 404);
