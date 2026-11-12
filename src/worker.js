@@ -94,7 +94,12 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TYPES = new Set(['expense', 'income']);
 const cleanName = (s, max = 40) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, max);
 
-const personOf = (b) => (typeof b.person_id === 'string' && /^[\w-]{1,64}$/.test(b.person_id) ? b.person_id : null);
+// person_id stores one or more people as a comma-separated list ("id1,id2"); money is split evenly between them
+const splitIds = (v) => (Array.isArray(v) ? v : String(v || '').split(','));
+function personOf(b) {
+  const ids = [...new Set(splitIds(b.person_ids ?? b.person_id).map((x) => String(x).trim()).filter((x) => /^[\w-]{1,64}$/.test(x)))].slice(0, 12);
+  return ids.length ? ids.join(',') : null;
+}
 function validateTx(b) {
   const amount = Math.round(Number(b.amount));
   if (!TYPES.has(b.type)) return 'Loại giao dịch không hợp lệ';
@@ -386,7 +391,7 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     return row ? json(row) : bad('Không tìm thấy', 404);
   }
   if (m && method === 'DELETE') {
-    const used = await DB.prepare('SELECT COUNT(*) AS n FROM transactions WHERE person_id=? AND book_id=?').bind(m[1], bookId).first();
+    const used = await DB.prepare("SELECT COUNT(*) AS n FROM transactions WHERE (',' || person_id || ',') LIKE ('%,' || ? || ',%') AND book_id=?").bind(m[1], bookId).first();
     if (used.n > 0) await DB.prepare('UPDATE people SET archived=1 WHERE id=? AND book_id=?').bind(m[1], bookId).run();
     else await DB.prepare('DELETE FROM people WHERE id=? AND book_id=?').bind(m[1], bookId).run();
     return json({ ok: true, archived: used.n > 0 });
@@ -473,7 +478,7 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
     const { results: myPeople } = await DB.prepare('SELECT id,name FROM people WHERE book_id=?').bind(bookId).all();
     const myPeopleIds = new Set(myPeople.map((p) => p.id));
     const peopleByName = new Map(myPeople.map((p) => [p.name.toLowerCase(), p.id]));
-    const resolvePerson = (srcId) => {
+    const resolveOne = (srcId) => {
       if (!srcId) return null;
       if (myPeopleIds.has(srcId)) return srcId;
       const src = srcPeople.get(srcId);
@@ -487,6 +492,10 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
       }
       srcPeople.set(srcId, { ...src, mapped: id });
       return id;
+    };
+    const resolvePerson = (r) => {
+      const ids = [...new Set(splitIds(r.person_ids ?? r.person_id).map((x) => resolveOne(String(x).trim())).filter(Boolean))];
+      return ids.length ? ids.join(',') : null;
     };
     const stmts = [];
     const resolveCat = (srcId, type) => {
@@ -533,7 +542,7 @@ async function bookRoutes(req, env, url, bookId, sub, user, role) {
       const cat = resolveCat(r.category_id, r.type);
       stmts.push(DB.prepare(
         'INSERT OR IGNORE INTO transactions (id,type,amount,category_id,person_id,note,date,created_at,updated_at,book_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
-      ).bind(id, r.type, Math.round(r.amount), cat, resolvePerson(r.person_id), String(r.note || '').slice(0, 200), r.date, Number(r.created_at) || t, t, bookId, user.id));
+      ).bind(id, r.type, Math.round(r.amount), cat, resolvePerson(r), String(r.note || '').slice(0, 200), r.date, Number(r.created_at) || t, t, bookId, user.id));
       count++;
     }
     for (let i = 0; i < stmts.length; i += 100) await DB.batch(stmts.slice(i, i + 100));

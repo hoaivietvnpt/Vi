@@ -25,7 +25,7 @@ Chạy trên **Cloudflare Workers + D1** tại **https://vi.nhv.me**.
   Quản trị người dùng, admin **đặt lại mật khẩu** → app tạo mật khẩu tạm; người dùng đăng nhập bằng mật khẩu tạm sẽ
   bị yêu cầu đặt mật khẩu mới ngay.
 - **Chi cho / Thu từ**: khi nhập giao dịch có thể chọn người liên quan (Bố, Mẹ, Vợ/Chồng, Con, Anh, Chị, Em, Ông bà,
-  Bạn bè… hoặc thêm nhanh bằng nút ＋). Mỗi người có một màu riêng; Báo cáo có thẻ *Người thân* với biểu đồ vòng tròn Chi cho ai / Thu từ ai, chạm để lọc sổ theo người.
+  Bạn bè… hoặc thêm nhanh bằng nút ＋). Chọn được nhiều người cho một giao dịch — số tiền được chia đều. Mỗi người có một màu riêng; khoản không chọn ai hiện là *Không xác định* (màu xám); Báo cáo có thẻ *Người thân* với biểu đồ vòng tròn Chi cho ai / Thu từ ai, chạm để lọc sổ theo người.
   Danh sách người quản lý trong Cài đặt → Người thân (riêng cho từng sổ).
 
 ## Thêm vào màn hình chính iPhone

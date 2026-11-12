@@ -150,7 +150,15 @@ async function loadAll() {
 }
 const sortTxs = () => state.txs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created_at || 0) - (a.created_at || 0)));
 const personById = (id) => state.people.find((p) => p.id === id) || null;
-const personPhrase = (t) => { const p = t.person_id && personById(t.person_id); return p ? `${p.icon} ${t.type === 'income' ? 'từ' : 'cho'} ${p.name}` : ''; };
+// person_id holds one or more ids separated by commas; the amount is split evenly between them
+const pidsOf = (t) => [...new Set(String(t?.person_id || '').split(',').filter(Boolean))];
+const peopleOf = (t) => pidsOf(t).map(personById).filter(Boolean);
+function personPhrase(t) {
+  const ps = peopleOf(t); if (!ps.length) return '';
+  const names = ps.length > 3 ? ps.slice(0, 3).map((p) => p.name).join(', ') + ` +${ps.length - 3}` : ps.map((p) => p.name).join(', ');
+  return `${ps.slice(0, 3).map((p) => p.icon).join('')} ${t.type === 'income' ? 'từ' : 'cho'} ${names}${ps.length > 1 ? ' (chia đều)' : ''}`;
+}
+const UNKNOWN = { id: '_none', name: 'Không xác định', icon: '❔', color: '#a3a29c' };
 const catById = (id) => state.cats.find((c) => c.id === id) || { id, name: 'Khác', icon: '📦', color: '#8a8984', type: 'expense' };
 
 /* ---------- aggregation ---------- */
@@ -227,14 +235,15 @@ function renderList() {
   let list = inRange(ms, me);
   if (state.listFilter !== 'all') list = list.filter((t) => t.type === state.listFilter);
   if (state.listCat) list = list.filter((t) => t.category_id === state.listCat);
-  if (state.listPerson) list = list.filter((t) => t.person_id === state.listPerson);
+  if (state.listPerson === '_none') list = list.filter((t) => !peopleOf(t).length);
+  else if (state.listPerson) list = list.filter((t) => pidsOf(t).includes(state.listPerson));
   const q = state.search.trim().toLowerCase();
-  if (q) list = list.filter((t) => (t.note + ' ' + catById(t.category_id).name + ' ' + (personById(t.person_id)?.name || '')).toLowerCase().includes(q));
+  if (q) list = list.filter((t) => (t.note + ' ' + catById(t.category_id).name + ' ' + peopleOf(t).map((p) => p.name).join(' ')).toLowerCase().includes(q));
 
   const ac = $('#activeCat');
   const chips = [];
   if (state.listCat) { const c = catById(state.listCat); chips.push(`<span>${esc(c.icon)} ${esc(c.name)} <button data-clear="cat" aria-label="Bỏ lọc">✕</button></span>`); }
-  if (state.listPerson) { const p = personById(state.listPerson); chips.push(`<span>${esc(p?.icon || '')} ${esc(p?.name || '')} <button data-clear="person" aria-label="Bỏ lọc">✕</button></span>`); }
+  if (state.listPerson) { const p = state.listPerson === '_none' ? UNKNOWN : personById(state.listPerson); chips.push(`<span>${esc(p?.icon || '')} ${esc(p?.name || '')} <button data-clear="person" aria-label="Bỏ lọc">✕</button></span>`); }
   ac.hidden = !chips.length;
   ac.innerHTML = chips.join('');
 
@@ -311,30 +320,33 @@ function renderReport() {
       }).join('')
     : emptyBox('Chưa có dữ liệu trong kỳ này.');
 
-  // by person (Chi cho / Thu từ)
+  // by person (Chi cho / Thu từ): split evenly between the people chosen; none chosen → "Không xác định"
   const ptype = state.personType;
   $$('#personType button').forEach((b) => b.classList.toggle('on', b.dataset.t === ptype));
   const byP = new Map(); let untagged = 0;
   for (const t of list) {
     if (t.type !== ptype) continue;
-    if (t.person_id && personById(t.person_id)) byP.set(t.person_id, (byP.get(t.person_id) || 0) + t.amount);
-    else untagged += t.amount;
+    const ps = peopleOf(t);
+    if (!ps.length) { untagged += t.amount; continue; }
+    for (const p of ps) byP.set(p.id, (byP.get(p.id) || 0) + t.amount / ps.length);
   }
   const prow = [...byP.entries()].map(([id, v]) => { const p = personById(id); return { c: { ...p, color: pColor(p) }, v }; }).sort((a, b) => b.v - a.v);
+  if (untagged) prow.push({ c: UNKNOWN, v: untagged });
   const ptTotal = prow.reduce((a, r) => a + r.v, 0);
   $('#personDonutWrap').hidden = !prow.length;
-  if (prow.length) donut($('#personDonut'), prow, ptTotal, ptype === 'expense' ? 'Chi cho người thân' : 'Thu từ người thân');
+  if (prow.length) donut($('#personDonut'), prow, ptTotal, ptype === 'expense' ? 'Tổng chi' : 'Tổng thu');
   $('#personBreakdown').innerHTML = prow.length
     ? prow.map((r) => {
         const pc = (r.v / ptTotal) * 100;
-        return `<button class="cat-row" data-person="${esc(r.c.id)}">
-        <span class="ic" style="background:${r.c.color}22">${esc(r.c.icon)}</span>
+        const unk = r.c.id === '_none';
+        return `<button class="cat-row${unk ? ' untagged' : ''}" data-person="${esc(r.c.id)}">
+        <span class="ic" style="background:${r.c.color}${unk ? '33' : '22'}">${esc(r.c.icon)}</span>
         <span class="nm">${esc(r.c.name)} <small>${pc < 1 ? '<1' : Math.round(pc)}%</small></span>
-        <span class="am">${nf.format(r.v)}</span>
+        <span class="am">${nf.format(Math.round(r.v))}</span>
         <span class="bar"><i style="width:${Math.max(pc, 1.5)}%;background:${r.c.color}"></i></span>
       </button>`;
-      }).join('') + (untagged ? `<div class="cat-row untagged"><span class="ic" style="background:var(--surface-2)">👤</span><span class="nm">Không ghi người <small>(của bạn)</small></span><span class="am">${nf.format(untagged)}</span></div>` : '')
-    : emptyBox(`Chưa có khoản ${ptype === 'expense' ? 'chi cho' : 'thu từ'} người thân trong kỳ này.<br><small>Chọn người ở mục “${ptype === 'expense' ? 'Chi cho ai?' : 'Thu từ ai?'}” khi nhập giao dịch.</small>`);
+      }).join('')
+    : emptyBox(`Chưa có khoản ${ptype === 'expense' ? 'chi' : 'thu'} nào trong kỳ này.`);
 
   // flow chart
   let buckets = [];
@@ -494,7 +506,7 @@ function donut(el, rows, total, label) {
 
 /* ---------- ADD / EDIT SHEET ---------- */
 
-const form = { id: null, type: 'expense', expr: '', cat: null, person: null, date: ymd(new Date()), note: '' };
+const form = { id: null, type: 'expense', expr: '', cat: null, people: [], date: ymd(new Date()), note: '' };
 
 function evalExpr(expr) {
   const tokens = expr.match(/\d+|[+-]/g) || [];
@@ -512,6 +524,7 @@ function renderAmount() {
   const v = evalExpr(e);
   $('#amountWords').innerHTML = hasOp ? `= <b>${money(v)}</b>` : v ? esc(readVnd(v)) : '&nbsp;';
   $('#saveBtn').textContent = hasOp ? '=' : 'Lưu';
+  renderSplitHint();
   // shrink font for long numbers
   const len = pretty.length;
   $('#amountDisplay').style.fontSize = len > 16 ? '28px' : len > 11 ? '36px' : '';
@@ -528,17 +541,24 @@ function renderCatGrid() {
 const pColor = (p) => (p && /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#64748B');
 function renderPeople() {
   $('#personLabel').textContent = form.type === 'income' ? 'Thu từ ai?' : 'Chi cho ai?';
-  const ppl = state.people.filter((p) => !p.archived || p.id === form.person);
+  const ppl = state.people.filter((p) => !p.archived || form.people.includes(p.id));
   // most used (for this type) first, then the saved order
   const usage = new Map();
-  for (const t of state.txs.slice(0, 500)) if (t.type === form.type && t.person_id) usage.set(t.person_id, (usage.get(t.person_id) || 0) + 1);
+  for (const t of state.txs.slice(0, 500)) if (t.type === form.type) for (const id of pidsOf(t)) usage.set(id, (usage.get(id) || 0) + 1);
   ppl.sort((a, b) => (usage.get(b.id) || 0) - (usage.get(a.id) || 0) || a.sort - b.sort);
-  $('#personChips').innerHTML = ppl.map((p) => `<button class="${p.id === form.person ? 'on' : ''}" data-person="${esc(p.id)}" style="--pc:${pColor(p)}">${esc(p.icon)} ${esc(p.name)}</button>`).join('')
+  $('#personChips').innerHTML = ppl.map((p) => `<button class="${form.people.includes(p.id) ? 'on' : ''}" data-person="${esc(p.id)}" style="--pc:${pColor(p)}">${esc(p.icon)} ${esc(p.name)}</button>`).join('')
     + '<button class="add" data-person-add>＋ Thêm</button>';
+  renderSplitHint();
+}
+function renderSplitHint() {
+  const n = form.people.length, v = evalExpr(form.expr);
+  $('#personHint').textContent = n > 1
+    ? `· chia đều ${n} người${v ? ': ' + money(Math.round(v / n)) + '/người' : ''}`
+    : n === 1 ? '' : '· chọn một hoặc nhiều người';
 }
 async function quickAddPerson() {
   const p = await personDialog();
-  if (p?.id) { form.person = p.id; renderPeople(); }
+  if (p?.id) { if (!form.people.includes(p.id)) form.people.push(p.id); renderPeople(); }
 }
 function renderDate() {
   const today = ymd(new Date()), yest = ymd(addDays(new Date(), -1));
@@ -556,8 +576,9 @@ function setType(type) {
   // new entries default to the last choices made for this book & type
   form.cat = LS.get(lastKey('cat', type), null);
   if (!form.id) {
-    const p = LS.get(lastKey('person', type), null);
-    form.person = p && state.people.some((x) => x.id === p && !x.archived) ? p : null;
+    const last = LS.get(lastKey('person', type), null);
+    const ids = Array.isArray(last) ? last : last ? String(last).split(',') : [];
+    form.people = ids.filter((id) => state.people.some((x) => x.id === id && !x.archived));
   }
   renderCatGrid(); renderPeople();
 }
@@ -567,7 +588,7 @@ function openSheet(tx) {
   form.note = tx?.note || '';
   form.date = tx?.date || ymd(new Date());
   setType(tx?.type || LS.get('last:' + state.bookId + ':type', 'expense'));
-  if (tx) { form.cat = tx.category_id; form.person = tx.person_id || null; renderCatGrid(); renderPeople(); }
+  if (tx) { form.cat = tx.category_id; form.people = pidsOf(tx); renderCatGrid(); renderPeople(); }
   $('#noteInput').value = form.note;
   $('#sheetDelete').hidden = !tx;
   $('#sheetSpacer').hidden = !!tx;
@@ -609,11 +630,11 @@ function save(keepOpen = false) {
   const amount = evalExpr(form.expr);
   if (!amount) { const d = $('#amountDisplay'); d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); haptic(30); return; }
   if (!form.cat) return toast('Hãy chọn danh mục');
-  const body = { type: form.type, amount, category_id: form.cat, person_id: form.person, note: $('#noteInput').value.trim(), date: form.date };
+  const body = { type: form.type, amount, category_id: form.cat, person_id: form.people.join(',') || null, note: $('#noteInput').value.trim(), date: form.date };
   if (!form.id) {
     LS.set('last:' + state.bookId + ':type', form.type);
     LS.set(lastKey('cat', form.type), form.cat);
-    LS.set(lastKey('person', form.type), form.person);
+    LS.set(lastKey('person', form.type), form.people);
   }
   if (form.id) {
     const t = state.txs.find((x) => x.id === form.id);
@@ -740,7 +761,7 @@ function download(name, content, type) {
 function exportCsv() {
   const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
   const lines = ['Ngày,Loại,Danh mục,Chi cho / Thu từ,Số tiền,Ghi chú'];
-  for (const t of [...state.txs].reverse()) lines.push([t.date, t.type === 'income' ? 'Thu' : 'Chi', q(catById(t.category_id).name), q(personById(t.person_id)?.name || ''), t.amount, q(t.note || '')].join(','));
+  for (const t of [...state.txs].reverse()) lines.push([t.date, t.type === 'income' ? 'Thu' : 'Chi', q(catById(t.category_id).name), q(peopleOf(t).map((p) => p.name).join(', ')), t.amount, q(t.note || '')].join(','));
   download(`vi-thu-chi-${ymd(new Date())}.csv`, '﻿' + lines.join('\n'), 'text/csv;charset=utf-8');
 }
 function exportJson() {
@@ -1015,8 +1036,10 @@ function bind() {
   $('#personChips').addEventListener('click', (e) => {
     if (e.target.closest('[data-person-add]')) return quickAddPerson();
     const b = e.target.closest('[data-person]'); if (!b) return; haptic();
-    form.person = form.person === b.dataset.person ? null : b.dataset.person;
-    $$('#personChips [data-person]').forEach((x) => x.classList.toggle('on', x.dataset.person === form.person));
+    const id = b.dataset.person;
+    form.people = form.people.includes(id) ? form.people.filter((x) => x !== id) : [...form.people, id];
+    b.classList.toggle('on', form.people.includes(id));
+    renderSplitHint();
   });
   $('#dateChips').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { form.date = ymd(addDays(new Date(), +b.dataset.d)); renderDate(); } });
   $('#dateInput').addEventListener('change', (e) => { if (e.target.value) { form.date = e.target.value; renderDate(); } });
