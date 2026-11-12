@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vi",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html", "**/*.css", "**/*.svg", "**/*.webmanifest", "**/public/*.js"], "fallthrough": true },
+    { "type": "Data", "globs": ["**/*.png"], "fallthrough": true }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vi-db",
+      "database_id": "79d9f3e3-ac30-47f8-acdb-b7a9c62c5b1b",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "routes": [{ "pattern": "vi.nhv.me", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

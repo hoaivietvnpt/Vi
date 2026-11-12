@@ -1,0 +1,14 @@
+{
+  "name": "vi",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:migrate:local": "wrangler d1 migrations apply vi-db --local",
+    "db:migrate": "wrangler d1 migrations apply vi-db --remote",
+    "deploy": "wrangler d1 migrations apply vi-db --remote && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}
